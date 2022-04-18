@@ -444,6 +444,16 @@ static int msm_gem_get_iova_locked(struct drm_gem_object *obj,
 		if ((dev && obj->import_attach) &&
 				((dev != obj->import_attach->dev) ||
 				msm_obj->obj_dirty)) {
+			if (of_device_is_compatible(dev->of_node, "qcom,smmu_sde_unsec") &&
+				of_device_is_compatible(obj->import_attach->dev->of_node,
+				"qcom,smmu_sde_sec")) {
+				SDE_EVT32(obj->import_attach->dev, dev, msm_obj->sgt,
+						 msm_obj->obj_dirty, obj, obj->import_attach->dmabuf);
+				DRM_ERROR("gem obj found mapped to %s, now requesting map on %s",
+					dev_name(obj->import_attach->dev), dev_name(dev));
+				return -EINVAL;
+			}
+
 			dmabuf = obj->import_attach->dmabuf;
 			dma_map_attrs = obj->import_attach->dma_map_attrs;
 
@@ -1035,6 +1045,7 @@ void msm_gem_free_object(struct drm_gem_object *obj)
 	}
 
 	if (obj->import_attach) {
+		SDE_EVT32(obj, obj->import_attach, obj->import_attach->dmabuf);
 		if (msm_obj->vaddr)
 			dma_buf_vunmap(obj->import_attach->dmabuf, msm_obj->vaddr);
 

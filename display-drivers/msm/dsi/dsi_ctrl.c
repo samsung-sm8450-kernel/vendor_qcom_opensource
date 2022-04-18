@@ -386,8 +386,14 @@ static void dsi_ctrl_dma_cmd_wait_for_done(struct dsi_ctrl *dsi_ctrl)
 	if (ret == 0 && !atomic_read(&dsi_ctrl->dma_irq_trig)) {
 		status = dsi_hw_ops.get_interrupt_status(&dsi_ctrl->hw);
 		if (status & mask) {
-#if IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
+#if 0//IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
 			struct samsung_display_driver_data *vdd = ss_get_vdd(dsi_ctrl->cell_index);
+
+			DSI_CTRL_WARN(dsi_ctrl,
+					"dma_tx done but irq not triggered\n");
+			// case 05372641
+			if (!dsi_ctrl->esd_check_underway && !vdd->panel_dead)
+				SDE_DBG_DUMP(SDE_DBG_BUILT_IN_ALL, "panic");
 #endif
 			status |= (DSI_CMD_MODE_DMA_DONE | DSI_BTA_DONE);
 			dsi_hw_ops.clear_interrupt_status(&dsi_ctrl->hw,
@@ -395,10 +401,6 @@ static void dsi_ctrl_dma_cmd_wait_for_done(struct dsi_ctrl *dsi_ctrl)
 			SDE_EVT32(dsi_ctrl->cell_index, SDE_EVTLOG_FUNC_CASE1);
 			DSI_CTRL_WARN(dsi_ctrl,
 					"dma_tx done but irq not triggered\n");
-
-			// case 05372641
-			if (!dsi_ctrl->esd_check_underway && !vdd->panel_dead)
-				SDE_DBG_DUMP(SDE_DBG_BUILT_IN_ALL, "panic");
 		} else {
 #if IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
 			struct samsung_display_driver_data *vdd = ss_get_vdd(dsi_ctrl->cell_index);

@@ -975,6 +975,17 @@ void cs35l41_i2c_fail_log(const char *suffix)
 	sec_abc_send_event("MODULE=audio@WARN=spk_amp");
 #endif
 }
+
+void cs35l41_amp_fail_event(const char *suffix)
+{
+	pr_info("%s(%s)\n", __func__, suffix);
+
+#if IS_ENABLED(CONFIG_SEC_FACTORY)
+	sec_abc_send_event("MODULE=audio@INFO=spk_amp_short");
+#else
+	sec_abc_send_event("MODULE=audio@WARN=spk_amp_short");
+#endif
+}
 #endif
 
 static int waipio_tdm_cirrus_init(struct snd_soc_pcm_runtime *rtd)
@@ -1012,6 +1023,8 @@ static int waipio_tdm_cirrus_init(struct snd_soc_pcm_runtime *rtd)
 #if IS_ENABLED(CONFIG_SEC_ABC)
 	cirrus_amp_register_i2c_error_callback("", cs35l41_i2c_fail_log);
 	cirrus_amp_register_i2c_error_callback("_r", cs35l41_i2c_fail_log);
+	cirrus_amp_register_error_callback("", cs35l41_amp_fail_event);
+	cirrus_amp_register_error_callback("_r", cs35l41_amp_fail_event);
 #endif
 	return 0;
 }

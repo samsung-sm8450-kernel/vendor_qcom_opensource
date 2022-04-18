@@ -2071,7 +2071,7 @@ int msm_vidc_adjust_cac(void *instance, struct v4l2_ctrl *ctrl)
 	struct msm_vidc_inst_capability *capability;
 	s32 adjusted_value;
 	struct msm_vidc_inst *inst = (struct msm_vidc_inst *) instance;
-	s32 min_quality = -1, rc_type = -1;
+	s32 rc_type = -1;
 
 	if (!inst || !inst->capabilities) {
 		d_vpr_e("%s: invalid params\n", __func__);
@@ -2086,8 +2086,6 @@ int msm_vidc_adjust_cac(void *instance, struct v4l2_ctrl *ctrl)
 		return 0;
 
 	if (msm_vidc_get_parent_value(inst, CONTENT_ADAPTIVE_CODING,
-		MIN_QUALITY, &min_quality, __func__) ||
-		msm_vidc_get_parent_value(inst, CONTENT_ADAPTIVE_CODING,
 		BITRATE_MODE, &rc_type, __func__))
 		return -EINVAL;
 
@@ -2097,11 +2095,6 @@ int msm_vidc_adjust_cac(void *instance, struct v4l2_ctrl *ctrl)
 	 */
 	if (rc_type != HFI_RC_VBR_CFR) {
 		adjusted_value = 0;
-		goto adjust;
-	}
-
-	if (min_quality) {
-		adjusted_value = 1;
 		goto adjust;
 	}
 
@@ -2117,7 +2110,7 @@ int msm_vidc_adjust_bitrate_boost(void *instance, struct v4l2_ctrl *ctrl)
 	struct msm_vidc_inst_capability *capability;
 	s32 adjusted_value;
 	struct msm_vidc_inst *inst = (struct msm_vidc_inst *) instance;
-	s32 min_quality = -1, rc_type = -1;
+	s32 rc_type = -1, cac_enable = -1;
 
 	if (!inst || !inst->capabilities) {
 		d_vpr_e("%s: invalid params\n", __func__);
@@ -2132,7 +2125,7 @@ int msm_vidc_adjust_bitrate_boost(void *instance, struct v4l2_ctrl *ctrl)
 		return 0;
 
 	if (msm_vidc_get_parent_value(inst, BITRATE_BOOST,
-		MIN_QUALITY, &min_quality, __func__) ||
+		CONTENT_ADAPTIVE_CODING, &cac_enable, __func__) ||
 		msm_vidc_get_parent_value(inst, BITRATE_BOOST,
 		BITRATE_MODE, &rc_type, __func__))
 		return -EINVAL;
@@ -2146,8 +2139,8 @@ int msm_vidc_adjust_bitrate_boost(void *instance, struct v4l2_ctrl *ctrl)
 		goto adjust;
 	}
 
-	if (min_quality) {
-		adjusted_value = MAX_BITRATE_BOOST;
+	if (!cac_enable) {
+		adjusted_value = 0;
 		goto adjust;
 	}
 
@@ -2164,6 +2157,7 @@ int msm_vidc_adjust_min_quality(void *instance, struct v4l2_ctrl *ctrl)
 	s32 adjusted_value;
 	struct msm_vidc_inst *inst = (struct msm_vidc_inst *) instance;
 	s32 roi_enable = -1, rc_type = -1, enh_layer_count = -1, pix_fmts = -1;
+	s32 cac_enable = -1;
 	u32 width, height, frame_rate;
 	struct v4l2_format *f;
 
@@ -2190,7 +2184,9 @@ int msm_vidc_adjust_min_quality(void *instance, struct v4l2_ctrl *ctrl)
 		msm_vidc_get_parent_value(inst, MIN_QUALITY,
 		META_ROI_INFO, &roi_enable, __func__) ||
 		msm_vidc_get_parent_value(inst, MIN_QUALITY,
-		ENH_LAYER_COUNT, &enh_layer_count, __func__))
+		ENH_LAYER_COUNT, &enh_layer_count, __func__) ||
+		msm_vidc_get_parent_value(inst, MIN_QUALITY,
+		CONTENT_ADAPTIVE_CODING, &cac_enable, __func__))
 		return -EINVAL;
 
 	/*
@@ -2255,6 +2251,14 @@ int msm_vidc_adjust_min_quality(void *instance, struct v4l2_ctrl *ctrl)
 	if (enh_layer_count && inst->hfi_layer_type != HFI_HIER_B) {
 		i_vpr_h(inst,
 			"%s: min quality not supported for HP encoding\n",
+			__func__);
+		adjusted_value = 0;
+		goto update_and_exit;
+	}
+
+	if (!cac_enable) {
+		i_vpr_h(inst,
+			"%s: min quality not supported with cac disabled\n",
 			__func__);
 		adjusted_value = 0;
 		goto update_and_exit;

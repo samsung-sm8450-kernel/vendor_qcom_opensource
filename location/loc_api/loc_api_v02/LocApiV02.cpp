@@ -10413,6 +10413,11 @@ LocApiV02::setOperationMode(GnssSuplMode mode)
         }
     }
 
+    // SEC: Operation mode should be standalone for wifi models.
+    if (mIsWifiOnly) {
+        sec_mode = GNSS_SUPL_MODE_STANDALONE;
+    }
+
     if (GNSS_SUPL_MODE_MSB == sec_mode) {
         set_mode_msg.operationMode = eQMI_LOC_OPER_MODE_MSB_V02;
         LOC_LOGV("%s:%d]: operationMode MSB", __func__, __LINE__);

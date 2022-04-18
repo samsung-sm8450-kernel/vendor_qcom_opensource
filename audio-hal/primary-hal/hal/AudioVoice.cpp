@@ -880,10 +880,8 @@ int AudioVoice::VoiceStart(voice_session_t *session) {
     }
 
 #ifdef SEC_AUDIO_DYNAMIC_NREC
-    if (adevice->effect_) {
-        // reset dsp aec mixer when entering cp call
-        adevice->effect_->SetECNS(true);
-    }
+    // reset dsp aec mixer when entering cp call
+    sec_voice_->SetECNS(true);
 #endif
 
 #ifdef SEC_AUDIO_CALL

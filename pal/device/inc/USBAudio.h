@@ -40,7 +40,11 @@
 
 #include <vector>
 
+#ifdef SEC_AUDIO_USB_CONFIGURATION
+#define USB_BUFF_SIZE           4096 // 2048 * 2
+#else
 #define USB_BUFF_SIZE           2048
+#endif
 #define CHANNEL_NUMBER_STR      "Channels: "
 #define PLAYBACK_PROFILE_STR    "Playback:"
 #define CAPTURE_PROFILE_STR     "Capture:"

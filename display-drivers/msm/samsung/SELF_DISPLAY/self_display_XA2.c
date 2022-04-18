@@ -383,6 +383,7 @@ static void self_icon_img_write(struct samsung_display_driver_data *vdd)
 
 	LCD_INFO(vdd, "++\n");
 
+	mutex_lock(&vdd->exclusive_tx.ex_tx_lock);
 	vdd->exclusive_tx.enable = 1;
 	while (!list_empty(&vdd->cmd_lock.wait_list) && --wait_cnt)
 		usleep_range(500, 500);
@@ -407,6 +408,7 @@ static void self_icon_img_write(struct samsung_display_driver_data *vdd)
 
 	vdd->exclusive_tx.enable = 0;
 	wake_up_all(&vdd->exclusive_tx.ex_tx_waitq);
+	mutex_unlock(&vdd->exclusive_tx.ex_tx_lock);
 
 	LCD_INFO(vdd, "--\n");
 }
@@ -569,6 +571,7 @@ static void self_aclock_img_write(struct samsung_display_driver_data *vdd)
 
 	LCD_INFO(vdd, "++\n");
 
+	mutex_lock(&vdd->exclusive_tx.ex_tx_lock);
 	vdd->exclusive_tx.enable = 1;
 	while (!list_empty(&vdd->cmd_lock.wait_list) && --wait_cnt)
 		usleep_range(500, 500);
@@ -597,6 +600,7 @@ static void self_aclock_img_write(struct samsung_display_driver_data *vdd)
 
 	vdd->exclusive_tx.enable = 0;
 	wake_up_all(&vdd->exclusive_tx.ex_tx_waitq);
+	mutex_unlock(&vdd->exclusive_tx.ex_tx_lock);
 
 	LCD_INFO(vdd, "--\n");
 }
@@ -744,6 +748,7 @@ static void self_dclock_img_write(struct samsung_display_driver_data *vdd)
 
 	LCD_INFO(vdd, "++\n");
 
+	mutex_lock(&vdd->exclusive_tx.ex_tx_lock);
 	vdd->exclusive_tx.enable = 1;
 	while (!list_empty(&vdd->cmd_lock.wait_list) && --wait_cnt)
 		usleep_range(500, 500);
@@ -770,6 +775,7 @@ static void self_dclock_img_write(struct samsung_display_driver_data *vdd)
 
 	vdd->exclusive_tx.enable = 0;
 	wake_up_all(&vdd->exclusive_tx.ex_tx_waitq);
+	mutex_unlock(&vdd->exclusive_tx.ex_tx_lock);
 
 	LCD_INFO(vdd, "--\n");
 }

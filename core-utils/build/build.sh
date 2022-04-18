@@ -233,10 +233,11 @@ DIST_ENABLED=false
 QSSI_ARGS_WITHOUT_DIST=""
 DIST_DIR="out/dist"
 MERGED_TARGET_FILES="$DIST_DIR/merged-qssi_${TARGET_PRODUCT}-target_files.zip"
+LEGACY_TARGET_FILES="$DIST_DIR/${TARGET_PRODUCT}-target_files-*.zip"
 MERGED_OTA_ZIP="$DIST_DIR/merged-qssi_${TARGET_PRODUCT}-ota.zip"
-DIST_ENABLED_TARGET_LIST=("holi" "taro" "kalama" "parrot" "lahaina" "kona" "sdm710" "sdm845" "msmnile" "sm6150" "trinket" "lito" "bengal" "atoll" "qssi" "qssi_32" "qssi_32go" "bengal_32" "bengal_32go" "msm8937_lily")
+DIST_ENABLED_TARGET_LIST=("holi" "taro" "kalama" "parrot" "lahaina" "kona" "sdm710" "sdm845" "msmnile" "sm6150" "trinket" "lito" "bengal" "atoll" "qssi" "qssi_32" "qssi_32go" "bengal_32" "bengal_32go" "msm8937_lily" "sdm660_64")
 VIRTUAL_AB_ENABLED_TARGET_LIST=("kona" "lito" "taro" "kalama" "parrot" "lahaina")
-DYNAMIC_PARTITION_ENABLED_TARGET_LIST=("holi" "taro" "kalama" "parrot" "lahaina" "kona" "msmnile" "sdm710" "lito" "trinket" "atoll" "qssi" "qssi_32" "qssi_32go" "bengal" "bengal_32" "bengal_32go" "sm6150" "msm8937_lily")
+DYNAMIC_PARTITION_ENABLED_TARGET_LIST=("holi" "taro" "kalama" "parrot" "lahaina" "kona" "msmnile" "sdm710" "lito" "trinket" "atoll" "qssi" "qssi_32" "qssi_32go" "bengal" "bengal_32" "bengal_32go" "sm6150" "msm8937_lily" "sdm660_64")
 DYNAMIC_PARTITIONS_IMAGES_PATH=$OUT
 DP_IMAGES_OVERRIDE=false
 
@@ -449,6 +450,10 @@ function generate_ota_zip () {
         MERGE_TARGET_FILES_COMMAND="$MERGE_TARGET_FILES_COMMAND --rebuild-sepolicy --vendor-otatools=$VENDOR_OTATOOLS"
     fi
 
+    if [[ "$FULL_BUILD" -eq 1 ]]; then
+        MERGE_TARGET_FILES_COMMAND="$MERGE_TARGET_FILES_COMMAND --rebuild-sepolicy --vendor-otatools=$DIST_DIR/otatools.zip"
+    fi
+
     command "$MERGE_TARGET_FILES_COMMAND"
 }
 
@@ -532,6 +537,25 @@ function full_build () {
         command "cp $QSSI_OUT/system_ext.img $OUT/"
     fi
     merge_only
+
+    if [ "$BOARD_DYNAMIC_PARTITION_ENABLE" = false ]; then
+        command "unzip -jo -DD $MERGED_TARGET_FILES IMAGES/*.img -x IMAGES/userdata.img -d $OUT"
+    fi
+
+}
+
+function nonqssi_legacy_build () {
+    command "source build/envsetup.sh"
+    if [ "$DP_IMAGES_OVERRIDE" = true ]; then
+       ARGS=${ARGS//"--dp_images_path=$DYNAMIC_PARTITIONS_IMAGES_PATH"/}
+    fi
+    command "make $ARGS"
+    if [ "$DIST_ENABLED" = true ] && [ "$BOARD_DYNAMIC_PARTITION_ENABLE" = true ]; then
+      check_if_file_exists "$DIST_DIR/super.img"
+      log "${TARGET_PRODUCT} copy $DIST_DIR/super.img to $OUT/ "
+      command "cp $DIST_DIR/super.img $OUT/"
+      command "unzip -jo -DD $LEGACY_TARGET_FILES IMAGES/*.img -x IMAGES/userdata.img -d $DYNAMIC_PARTITIONS_IMAGES_PATH"
+    fi
 }
 
 function run_dca() {
@@ -554,8 +578,7 @@ done
 # For non-QSSI targets
 if [ $QSSI_TARGET_FLAG -eq 0 ]; then
     log "${TARGET_PRODUCT} is not a QSSI target. Using legacy build process for compilation..."
-    command "source build/envsetup.sh"
-    command "make $ARGS"
+    nonqssi_legacy_build
 else # For QSSI targets
     log "Building Android using build.sh for ${TARGET_PRODUCT}..."
     log "QSSI_ARGS=\"$QSSI_ARGS\""

@@ -224,6 +224,8 @@ enum BR_TYPE {
 #define SAMSUNG_DISPLAY_PINCTRL1_STATE_DEFAULT "samsung_display_gpio_control0_default"
 #define SAMSUNG_DISPLAY_PINCTRL1_STATE_SLEEP  "samsung_display_gpio_control0_sleep"
 
+#define SAMSUNG_DISPLAY_PANEL_NAME "samsung_display_panel"
+
 enum {
 	SAMSUNG_GPIO_CONTROL0,
 	SAMSUNG_GPIO_CONTROL1,
@@ -306,6 +308,7 @@ struct lpm_info {
 	int entry_delay;
 	int exit_frame;
 	int exit_delay;
+	bool need_br_update;
 
 	struct mutex lpm_lock;
 
@@ -1473,6 +1476,12 @@ void A23_FT8720_LPS066A767A_FHD_init(struct samsung_display_driver_data *vdd);
 void S6E3XA2_AMF755ZE01_QXGA_init(struct samsung_display_driver_data *vdd);
 void S6E3FAB_AMB623ZF01_HD_init(struct samsung_display_driver_data *vdd);
 void GTS8_NT36523_TL109BVMS2_WQXGA_init(struct samsung_display_driver_data *vdd);
+void B4_S6E3FAC_AMF670BS01_FHD_init(struct samsung_display_driver_data *vdd);
+void B4_S6E36W3_AMB190ZB01_260X512_init(struct samsung_display_driver_data *vdd);
+void A23XQ_NT36672C_PM6585JB3_FHD_init(struct samsung_display_driver_data *vdd);
+void A23XQ_TD4375_BS066FBM_FHD_init(struct samsung_display_driver_data *vdd);
+void Q4_S6E3XA2_AMF756BQ01_QXGA_init(struct samsung_display_driver_data *vdd);
+void Q4_S6E3FAC_AMB619BR01_HD_init(struct samsung_display_driver_data *vdd);
 void PBA_BOOTING_FHD_init(struct samsung_display_driver_data *vdd);
 void PBA_BOOTING_FHD_DSI1_init(struct samsung_display_driver_data *vdd);
 
@@ -1480,7 +1489,7 @@ struct panel_func {
 	/* ON/OFF */
 	int (*samsung_panel_on_pre)(struct samsung_display_driver_data *vdd);
 	int (*samsung_panel_on_post)(struct samsung_display_driver_data *vdd);
-	int (*samsung_display_on_post_debug)(struct samsung_display_driver_data *vdd);
+	int (*samsung_display_on_post)(struct samsung_display_driver_data *vdd);
 	int (*samsung_panel_off_pre)(struct samsung_display_driver_data *vdd);
 	int (*samsung_panel_off_post)(struct samsung_display_driver_data *vdd);
 	void (*samsung_panel_init)(struct samsung_display_driver_data *vdd);
@@ -2196,6 +2205,7 @@ struct samsung_display_driver_data {
 	struct mutex cmd_lock;
 	struct mutex bl_lock;
 	struct mutex ss_spi_lock;
+	struct mutex display_on_lock;
 
 	struct samsung_display_debug_data *debug_data;
 	struct ss_exclusive_mipi_tx exclusive_tx;
@@ -2214,6 +2224,10 @@ struct samsung_display_driver_data {
 	struct panel_func panel_func;
 
 	bool support_ss_cmd;
+	bool ss_cmd_dsc_long_write; /* 39h instead of 29h */
+	bool ss_cmd_dsc_short_write_param;  /* 15h instead of 05h */
+	bool ss_cmd_always_last_command_set;
+
 	// parsed data from dtsi
 	struct samsung_display_dtsi_data dtsi_data;
 
@@ -2442,6 +2456,9 @@ struct samsung_display_driver_data {
 	/* Motto phy tune */
 	struct device *motto_device;
 	struct motto_data motto_info;
+
+	/* wakeup source */
+	struct wakeup_source *panel_wakeup_source;
 
 	/* panel notifier work */
 	struct workqueue_struct *notify_wq;

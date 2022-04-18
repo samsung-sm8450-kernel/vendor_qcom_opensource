@@ -582,6 +582,7 @@ public:
     void getChannelMap(uint8_t *channel_map, int channels);
     int registerStream(Stream *s);
     int deregisterStream(Stream *s);
+    int isActiveStream(Stream *s);
     int registerDevice(std::shared_ptr<Device> d, Stream *s);
     int deregisterDevice(std::shared_ptr<Device> d, Stream *s);
     int registerDevice_l(std::shared_ptr<Device> d, Stream *s);
@@ -771,6 +772,8 @@ public:
      */
     void lockGraph() { mGraphMutex.lock(); };
     void unlockGraph() { mGraphMutex.unlock(); };
+    void lockActiveStream() { mActiveStreamMutex.lock(); };
+    void unlockActiveStream() { mActiveStreamMutex.unlock(); };
     void getSharedBEActiveStreamDevs(std::vector <std::tuple<Stream *, uint32_t>> &activeStreamDevs,
                                      int dev_id);
     int32_t streamDevSwitch(std::vector <std::tuple<Stream *, uint32_t>> streamDevDisconnectList,

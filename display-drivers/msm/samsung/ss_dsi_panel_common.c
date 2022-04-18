@@ -776,6 +776,8 @@ void ss_event_frame_update_post(struct samsung_display_driver_data *vdd)
 	if (!vdd)
 		return;
 
+	mutex_lock(&vdd->display_on_lock);
+
 	panel_func = &vdd->panel_func;
 
 	if (vdd->display_status_dsi.wait_disp_on) {
@@ -826,9 +828,6 @@ void ss_event_frame_update_post(struct samsung_display_driver_data *vdd)
 			ss_send_cmd(vdd, TX_DISPLAY_ON_POST);
 		}
 
-		if (vdd->panel_func.samsung_display_on_post_debug)
-			vdd->panel_func.samsung_display_on_post_debug(vdd);
-
 		if (vdd->panel_lpm.need_self_grid && ss_is_panel_lpm(vdd)) {
 			/* should distinguish display_on and self_grid_off with vsnyc */
 			/* delay 34ms in self_grid_off_revA cmds */
@@ -871,6 +870,11 @@ void ss_event_frame_update_post(struct samsung_display_driver_data *vdd)
 			queue_work(vdd->copr.read_copr_wq, &vdd->copr.read_copr_work);
 	}
 skip_display_on:
+	mutex_unlock(&vdd->display_on_lock);
+	
+	if (vdd->panel_func.samsung_display_on_post)
+		vdd->panel_func.samsung_display_on_post(vdd);
+
 	return;
 }
 
@@ -3273,9 +3277,6 @@ int ss_panel_off_pre(struct samsung_display_driver_data *vdd)
 	/* use recovery only on the first booting */
 	vdd->flash_done_fail = false;
 
-	if (vdd->panel_func.samsung_display_on_post_debug)
-		vdd->panel_func.samsung_display_on_post_debug(vdd);
-
 	/* self mask checksum read */
 	if (vdd->self_disp.self_display_debug)
 		vdd->self_disp.self_display_debug(vdd);
@@ -3314,16 +3315,20 @@ int ss_panel_off_pre(struct samsung_display_driver_data *vdd)
  */
 int ss_panel_off_post(struct samsung_display_driver_data *vdd)
 {
+	struct dsi_panel *panel = GET_DSI_PANEL(vdd);
 	int ret = 0;
 
 	LCD_INFO(vdd, "+\n");
 
 	/* Ignore dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_OFF).
 	 * Instead, send TX_DSI_CMD_SET_OFF in ss_panel_off_post(), here.
+	 * ss_panel_off_pre() already set PANEL_PWR_OFF, so it fails to send command with
+	 * ss_send_cmd() api... Instead, use dsi_panel_tx_cmd_set().
+	 * TODO: add PANEL_PWR_OFF_READY..
 	 */
-	if (is_ss_style_cmd(vdd, TX_DSI_CMD_SET_OFF)) {
+	if (is_ss_style_cmd(vdd, TX_DSI_CMD_SET_OFF) && panel) {
 		LCD_INFO(vdd, "tx ss off_cmd\n");
-		ss_send_cmd(vdd, TX_DSI_CMD_SET_OFF);
+		dsi_panel_tx_cmd_set(panel, TX_DSI_CMD_SET_OFF);
 	}
 
 	vdd->display_on = false;
@@ -3527,6 +3532,9 @@ static int esd_irq_enable(bool enable, bool nosync, void *data, u32 esd_mask)
 		desc = irq_to_desc(irq[i]);
 		if (enable) {
 			/* clear esd irq triggered while it was disabled. */
+			if (desc->irq_data.chip->irq_ack)
+				desc->irq_data.chip->irq_ack(&desc->irq_data);
+
 			if (desc->istate & IRQS_PENDING) {
 				LCD_DEBUG(vdd, "clear esd irq pending status\n");
 				desc->istate &= ~IRQS_PENDING;
@@ -3900,14 +3908,10 @@ static irqreturn_t ss_ub_con_det_handler(int irq, void *handle)
 
 	vdd->ub_con_det.ub_con_cnt++;
 
-	/* TFT panel needs to turn off buck, backlight en.
-	 * when connector detached.
-	 * Because esd_irq will not happen if esd_touch_notify enabled
-	 */
-	if (vdd->dtsi_data.tft_common_support && vdd->esd_touch_notify) {
-		check_aot_reset_early_off();
-		dsi_panel_power_off(panel);
-	}
+	/* Regardless of ESD interrupt, it should guarantee display power off */
+	LCD_INFO(vdd, "turn off dipslay power\n");
+	check_aot_reset_early_off();
+	dsi_panel_power_off(panel);
 
 	LCD_INFO(vdd, "-- cnt : %d\n", vdd->ub_con_det.ub_con_cnt);
 
@@ -5289,6 +5293,9 @@ static void ss_panel_parse_dt(struct samsung_display_driver_data *vdd)
 	}
 
 	vdd->support_ss_cmd = of_property_read_bool(np, "samsung,support_ss_cmd");
+	vdd->ss_cmd_dsc_long_write = of_property_read_bool(np, "samsung,ss_cmd_dsc_long_write");
+	vdd->ss_cmd_dsc_short_write_param = of_property_read_bool(np, "samsung,ss_cmd_dsc_short_write_param");
+	vdd->ss_cmd_always_last_command_set = of_property_read_bool(np, "samsung,ss_cmd_always_last_command_set");
 
 	ss_dsi_panel_parse_cmd_sets(vdd);
 	ss_wrapper_parse_cmd_sets_each_mode(vdd); /* deprecated */
@@ -7483,16 +7490,6 @@ brr_done:
 	 *                   No more screen noise.
 	 */
 	if (!vrr->running_vrr_mdp) {
-		/* SDE core clock will be applied to system by calling ss_set_normal_sde_core_clk().
-		 * But, panel's new refresh rate will be applied in next TE after sending VRR commands.
-		 * So, delay one frame before restore SDE core clock.
-		 */
-		int min_rr = min(cur_rr, adjusted_rr);
-		int interval_us = (1000000 / min_rr) + 1000; /* 1ms dummy */
-
-		LCD_INFO(vdd, "delay 1frame(min_rr: %d, %dus)\n", min_rr, interval_us);
-		usleep_range(interval_us, interval_us);
-
 		/* Set SDE clock to normal */
 		schedule_delayed_work(&vdd->sde_normal_clk_work,
 				msecs_to_jiffies(SDE_CLK_WORK_DELAY));
@@ -7896,6 +7893,7 @@ void ss_panel_init(struct dsi_panel *panel)
 	mutex_init(&vdd->cmd_lock);
 	mutex_init(&vdd->bl_lock);
 	mutex_init(&vdd->ss_spi_lock);
+	mutex_init(&vdd->display_on_lock);
 
 	/* To guarantee ALPM ON or OFF mode change operation*/
 	mutex_init(&vdd->panel_lpm.lpm_lock);
@@ -8041,6 +8039,9 @@ void ss_panel_init(struct dsi_panel *panel)
 	/* SDE Clock Work */
 	INIT_DELAYED_WORK(&vdd->sde_normal_clk_work, (work_func_t)ss_sde_normal_clk_work);
 
+	/* wakeup source */
+	vdd->panel_wakeup_source = wakeup_source_register(&panel->mipi_device.dev, SAMSUNG_DISPLAY_PANEL_NAME);
+
 	mutex_init(&vdd->notify_lock);
 
 	/* init gamma mode2 flash data */
@@ -8105,8 +8106,8 @@ int samsung_panel_initialize(char *panel_string, unsigned int ndx)
 		vdd->panel_func.samsung_panel_init = S6TUUM1_AMSA24VU01_WQXGA_init;
 #endif
 #if IS_ENABLED(CONFIG_PANEL_S6TUUM1_AMSA46AS01_WQXGA)
-		else if (!strncmp(panel_string, "ss_dsi_panel_S6TUUM1_AMSA46AS01_WQXGA", strlen(panel_string)))
-			vdd->panel_func.samsung_panel_init = S6TUUM1_AMSA46AS01_WQXGA_init;
+	else if (!strncmp(panel_string, "ss_dsi_panel_S6TUUM1_AMSA46AS01_WQXGA", strlen(panel_string)))
+		vdd->panel_func.samsung_panel_init = S6TUUM1_AMSA46AS01_WQXGA_init;
 #endif
 #if IS_ENABLED(CONFIG_PANEL_S6E3HAE_AMB681AZ01_WQHD)
 	else if (!strncmp(panel_string, "ss_dsi_panel_S6E3HAE_AMB681AZ01_WQHD", strlen(panel_string)))
@@ -8141,9 +8142,34 @@ int samsung_panel_initialize(char *panel_string, unsigned int ndx)
 		vdd->panel_func.samsung_panel_init = S6E3FAB_AMB623ZF01_HD_init;
 #endif
 #if IS_ENABLED(CONFIG_PANEL_GTS8_NT36523_TL109BVMS2_WQXGA)
-		else if (!strncmp(panel_string, "GTS8_NT36523_TL109BVMS2", strlen(panel_string)))
-			vdd->panel_func.samsung_panel_init = GTS8_NT36523_TL109BVMS2_WQXGA_init;
+	else if (!strncmp(panel_string, "GTS8_NT36523_TL109BVMS2", strlen(panel_string)))
+		vdd->panel_func.samsung_panel_init = GTS8_NT36523_TL109BVMS2_WQXGA_init;
 #endif
+#if IS_ENABLED(CONFIG_PANEL_B4_S6E3FAC_AMF670BS01_FHD)
+	else if (!strncmp(panel_string, "B4_S6E3FAC_AMF670BS01", strlen(panel_string)))
+		vdd->panel_func.samsung_panel_init = B4_S6E3FAC_AMF670BS01_FHD_init;
+#endif
+#if IS_ENABLED(CONFIG_PANEL_B4_S6E36W3_AMB190ZB01_260X512)
+	else if (!strncmp(panel_string, "B4_S6E36W3_AMB190ZB01", strlen(panel_string)))
+		vdd->panel_func.samsung_panel_init = B4_S6E36W3_AMB190ZB01_260X512_init;
+#endif
+#if IS_ENABLED(CONFIG_PANEL_A23XQ_NT36672C_PM6585JB3_FHD)
+	else if (!strncmp(panel_string, "A23XQ_NT36672C_PM6585JB3", strlen(panel_string)))
+		vdd->panel_func.samsung_panel_init = A23XQ_NT36672C_PM6585JB3_FHD_init;
+#endif
+#if IS_ENABLED(CONFIG_PANEL_A23XQ_TD4375_BS066FBM_FHD)
+	else if (!strncmp(panel_string, "A23XQ_TD4375_BS066FBM", strlen(panel_string)))
+		vdd->panel_func.samsung_panel_init = A23XQ_TD4375_BS066FBM_FHD_init;
+#endif
+#if IS_ENABLED(CONFIG_PANEL_Q4_S6E3XA2_AMF756BQ01_QXGA)
+	else if (!strncmp(panel_string, "Q4_S6E3XA2_AMF756BQ01", strlen(panel_string)))
+		vdd->panel_func.samsung_panel_init = Q4_S6E3XA2_AMF756BQ01_QXGA_init;
+#endif
+#if IS_ENABLED(CONFIG_PANEL_Q4_S6E3FAC_AMB619BR01_HD)
+	else if (!strncmp(panel_string, "Q4_S6E3FAC_AMB619BR01", strlen(panel_string)))
+		vdd->panel_func.samsung_panel_init = Q4_S6E3FAC_AMB619BR01_HD_init;
+#endif
+
 	else {
 		LCD_ERR(vdd, "[%s] not found\n", panel_string);
 		return -1;

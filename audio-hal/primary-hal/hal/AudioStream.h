@@ -475,6 +475,7 @@ public:
     audio_format_t  GetFormat();
     audio_channel_mask_t GetChannelMask();
     int getPalDeviceIds(const std::set<audio_devices_t> &halDeviceIds, pal_device_id_t* palOutDeviceIds);
+    int setPalStreamEffectParams(uint32_t tag_id, pal_effect_custom_payload_t *payload, uint32_t payload_size);
     audio_io_handle_t GetHandle();
     int             GetUseCase();
     std::mutex write_wait_mutex_;
@@ -526,7 +527,7 @@ private:
     // Helper function for write to open pal stream & configure.
     ssize_t configurePalOutputStream();
     //Helper method to standby streams upon write failures and sleep for buffer duration.
-    ssize_t onWriteError(size_t bytes, size_t ret);
+    ssize_t onWriteError(size_t bytes, ssize_t ret);
     struct pal_device* mPalOutDevice;
     pal_device_id_t* mPalOutDeviceIds;
     std::set<audio_devices_t> mAndroidOutDevices;

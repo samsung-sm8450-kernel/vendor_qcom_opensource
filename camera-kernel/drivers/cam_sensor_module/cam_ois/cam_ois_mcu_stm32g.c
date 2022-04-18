@@ -2616,7 +2616,7 @@ int cam_ois_gyro_sensor_calibration(struct cam_ois_ctrl_t *o_ctrl,
 	int rc = 0, result = 0;
 	uint32_t RcvData = 0;
 	int xgzero_val = 0, ygzero_val = 0, zgzero_val = 0;
-	int retries = 30;
+	int retries = 40;
 	int scale_factor = OIS_GYRO_SCALE_FACTOR_LSM6DSO;
 	uint32_t rcvStatus = 0x23;
 
@@ -2626,28 +2626,19 @@ int cam_ois_gyro_sensor_calibration(struct cam_ois_ctrl_t *o_ctrl,
 	if (!o_ctrl)
 		return 0;
 
-	do
-	{
-		rc = cam_ois_i2c_read(o_ctrl, OISSTS, &RcvData,
-			CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); /* OISSTS Read */
-		if (rc < 0)
-			CAM_ERR(CAM_OIS, "i2c read fail %d", rc);
-		if (--retries < 0){
-		    CAM_ERR(CAM_OIS, "OISSTS Read failed  %d", RcvData);
-			rc = -1;
-			break;
-		}
-		usleep_range(20000, 21000);
-	} while(RcvData != 1);
+	if (cam_ois_wait_idle(o_ctrl, 2) < 0) {
+		CAM_ERR(CAM_OIS, "wait ois idle status failed");
+		return 0;
+	}
 
 	/* Gyro Calibration Start */
 	/* GCCTRL GSCEN set */
-	cam_ois_i2c_write(o_ctrl, GCCTRL, 0x01,
+	rc = cam_ois_i2c_write(o_ctrl, GCCTRL, 0x01,
 		CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); /* GCCTRL register(0x0014) 1Byte Send */
 	if (rc < 0)
 		CAM_ERR(CAM_OIS, "i2c write fail %d", rc);
+
 	/* Check Gyro Calibration Sequence End */
-	retries = 40;
 	do
 	{
 		rc = cam_ois_i2c_read(o_ctrl, GCCTRL, &RcvData,

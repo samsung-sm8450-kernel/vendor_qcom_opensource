@@ -808,7 +808,7 @@ static inline void _sde_plane_set_scanout(struct drm_plane *plane,
 		 */
 		psde->is_error = true;
 	} else if (psde->pipe_hw->ops.setup_sourceaddress) {
-		SDE_EVT32_VERBOSE(psde->pipe_hw->idx,
+		SDE_EVT32(psde->pipe_hw->idx,
 				pipe_cfg->layout.width,
 				pipe_cfg->layout.height,
 				pipe_cfg->layout.plane_addr[0],
@@ -2023,7 +2023,9 @@ static int sde_plane_prepare_fb(struct drm_plane *plane,
 		ret = msm_framebuffer_prepare(fb,
 				pstate->aspace);
 		if (ret) {
-			SDE_ERROR("failed to prepare framebuffer\n");
+			SDE_ERROR("failed to prepare framebuffer fb:%d plane:%d pipe:%d ret:%d\n",
+				 fb->base.id, plane->base.id, psde->pipe, ret);
+			SDE_EVT32(fb->base.id, plane->base.id, psde->pipe, ret, SDE_EVTLOG_ERROR);
 			return ret;
 		}
 	}

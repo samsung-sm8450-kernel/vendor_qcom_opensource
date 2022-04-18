@@ -47,6 +47,7 @@
 #define VP9     MSM_VIDC_VP9
 #define HEIC    MSM_VIDC_HEIC
 #define CODECS_ALL     (H264 | HEVC | VP9 | HEIC)
+#define MAXIMUM_OVERRIDE_VP9_FPS 120
 
 static struct msm_platform_core_capability core_data_waipio[] = {
 	/* {type, value} */
@@ -207,8 +208,8 @@ static struct msm_platform_inst_capability instance_data_waipio[] = {
 	{MBPS, ENC, CODECS_ALL, 64, 3916800, 1, 3916800},
 	/* ((1920 * 1088) / 256) * 960 fps */
 	{MBPS, DEC, CODECS_ALL, 64, 7833600, 1, 7833600},
-	/* ((4096 * 2304) / 256) * 60 */
-	{MBPS, DEC, VP9, 36, 2211840, 1, 2211840},
+	/* ((4096 * 2304) / 256) * 120 */
+	{MBPS, DEC, VP9, 36, 4423680, 1, 4423680},
 	/* ((4096 * 2304) / 256) * 60 fps */
 	{POWER_SAVE_MBPS, ENC, CODECS_ALL, 0, 2211840, 1, 2211840},
 
@@ -234,7 +235,7 @@ static struct msm_platform_inst_capability instance_data_waipio[] = {
 		1, (DEFAULT_FPS << 16)},
 
 	{OPERATING_RATE, DEC, VP9,
-		(MINIMUM_FPS << 16), (MAXIMUM_VP9_FPS << 16),
+		(MINIMUM_FPS << 16), (MAXIMUM_OVERRIDE_VP9_FPS << 16),
 		1, (DEFAULT_FPS << 16)},
 
 	{SCALE_FACTOR, ENC, H264|HEVC, 1, 8, 1, 8},
@@ -590,11 +591,11 @@ static struct msm_platform_inst_capability instance_data_waipio[] = {
 
 	{CONTENT_ADAPTIVE_CODING, ENC, H264|HEVC,
 		V4L2_MPEG_MSM_VIDC_DISABLE, V4L2_MPEG_MSM_VIDC_ENABLE,
-		1, V4L2_MPEG_MSM_VIDC_ENABLE,
+		1, V4L2_MPEG_MSM_VIDC_DISABLE,
 		V4L2_CID_MPEG_VIDC_CONTENT_ADAPTIVE_CODING,
 		HFI_PROP_CONTENT_ADAPTIVE_CODING,
 		CAP_FLAG_OUTPUT_PORT,
-		{BITRATE_MODE, MIN_QUALITY},
+		{BITRATE_MODE},
 		{BLUR_TYPES},
 		msm_vidc_adjust_cac,
 		msm_vidc_set_vbr_related_properties},
@@ -604,29 +605,29 @@ static struct msm_platform_inst_capability instance_data_waipio[] = {
 		V4L2_CID_MPEG_VIDC_QUALITY_BITRATE_BOOST,
 		HFI_PROP_BITRATE_BOOST,
 		CAP_FLAG_OUTPUT_PORT,
-		{BITRATE_MODE, MIN_QUALITY},
+		{BITRATE_MODE, CONTENT_ADAPTIVE_CODING},
 		{0},
 		msm_vidc_adjust_bitrate_boost,
 		msm_vidc_set_vbr_related_properties},
 
 	{MIN_QUALITY, ENC, H264,
-		0, MAX_SUPPORTED_MIN_QUALITY, 70, MAX_SUPPORTED_MIN_QUALITY,
+		0, MAX_SUPPORTED_MIN_QUALITY, 70, 0,
 		0,
 		HFI_PROP_MAINTAIN_MIN_QUALITY,
 		CAP_FLAG_OUTPUT_PORT,
-		{BITRATE_MODE, ENH_LAYER_COUNT, META_ROI_INFO},
-		{CONTENT_ADAPTIVE_CODING, BITRATE_BOOST, BLUR_TYPES},
+		{BITRATE_MODE, ENH_LAYER_COUNT, META_ROI_INFO, CONTENT_ADAPTIVE_CODING},
+		{BITRATE_BOOST, BLUR_TYPES},
 		msm_vidc_adjust_min_quality,
 		msm_vidc_set_vbr_related_properties},
 
 	{MIN_QUALITY, ENC, HEVC,
-		0, MAX_SUPPORTED_MIN_QUALITY, 70, MAX_SUPPORTED_MIN_QUALITY,
+		0, MAX_SUPPORTED_MIN_QUALITY, 70, 0,
 		0,
 		HFI_PROP_MAINTAIN_MIN_QUALITY,
 		CAP_FLAG_OUTPUT_PORT,
 		{BITRATE_MODE, PIX_FMTS, ENH_LAYER_COUNT,
-			META_ROI_INFO},
-		{CONTENT_ADAPTIVE_CODING, BITRATE_BOOST, BLUR_TYPES},
+			META_ROI_INFO, CONTENT_ADAPTIVE_CODING},
+		{BITRATE_BOOST, BLUR_TYPES},
 		msm_vidc_adjust_min_quality,
 		msm_vidc_set_vbr_related_properties},
 

@@ -4874,7 +4874,7 @@ eeropm_crc_check :
 
 				if (e_ctrl->is_supported != normal_crc_value) {
 					CAM_ERR(CAM_EEPROM, "Any CRC values at F-ROM are not matched.");
-					if (crc_check_retry_cnt < 1) {
+					if (crc_check_retry_cnt < 10) {
 						crc_check_retry_cnt++;
 						CAM_ERR(CAM_EEPROM, "Retry to read F-ROM : %d", crc_check_retry_cnt);
 #if defined(FORCE_DISABLE_REGULATOR)

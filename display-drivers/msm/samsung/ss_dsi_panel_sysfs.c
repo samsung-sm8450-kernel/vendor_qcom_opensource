@@ -3180,6 +3180,29 @@ static ssize_t ss_disp_SVC_OCTA2_DDI_CHIPID_show(struct device *dev,
 	return strlen(buf);
 }
 
+static ssize_t mipi_samsung_esd_check_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct samsung_display_driver_data *vdd =
+		(struct samsung_display_driver_data *)dev_get_drvdata(dev);
+	int value;
+
+	if (IS_ERR_OR_NULL(vdd)) {
+		LCD_INFO(vdd, "no vdd");
+		return size;
+	}
+
+	if (sscanf(buf, "%d", &value) != 1)
+		return size;
+
+	LCD_INFO(vdd, "value : %d\n", value);
+
+	if (vdd->esd_recovery.esd_irq_enable)
+		vdd->esd_recovery.esd_irq_enable(value, true, (void *)vdd, ESD_MASK_DEFAULT);
+	
+	return size;
+}
+
 static ssize_t mipi_samsung_esd_check_show(struct device *dev,
 			struct device_attribute *attr, char *buf)
 {
@@ -5269,7 +5292,7 @@ static DEVICE_ATTR(SVC_OCTA_CHIPID, S_IRUGO, ss_disp_SVC_OCTA_CHIPID_show, NULL)
 static DEVICE_ATTR(SVC_OCTA2_CHIPID, S_IRUGO, ss_disp_SVC_OCTA2_CHIPID_show, NULL);
 static DEVICE_ATTR(SVC_OCTA_DDI_CHIPID, S_IRUGO, ss_disp_SVC_OCTA_DDI_CHIPID_show, NULL);
 static DEVICE_ATTR(SVC_OCTA2_DDI_CHIPID, S_IRUGO, ss_disp_SVC_OCTA2_DDI_CHIPID_show, NULL);
-static DEVICE_ATTR(esd_check, S_IRUGO, mipi_samsung_esd_check_show, NULL);
+static DEVICE_ATTR(esd_check, S_IRUGO | S_IWUSR | S_IWGRP, mipi_samsung_esd_check_show, mipi_samsung_esd_check_store);
 static DEVICE_ATTR(rf_info, S_IRUGO | S_IWUSR | S_IWGRP, ss_rf_info_show, ss_rf_info_store);
 static DEVICE_ATTR(dynamic_freq, S_IRUGO | S_IWUSR | S_IWGRP, ss_dynamic_freq_show, ss_dynamic_freq_store);
 static DEVICE_ATTR(tuning, 0664, tuning_show, tuning_store);

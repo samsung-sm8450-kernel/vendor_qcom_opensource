@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -749,8 +750,12 @@ qdf_export_symbol(wmi_mtrace);
 
 QDF_STATUS wmi_unified_cmd_send_pm_chk(struct wmi_unified *wmi_handle,
 				       wmi_buf_t buf,
-				       uint32_t buflen, uint32_t cmd_id)
+				       uint32_t buflen, uint32_t cmd_id,
+				       bool is_qmi_send_support)
 {
+	if (!is_qmi_send_support)
+		goto send_over_wmi;
+
 	if (!wmi_is_qmi_stats_enabled(wmi_handle))
 		goto send_over_wmi;
 
@@ -5561,7 +5566,7 @@ static QDF_STATUS send_process_ll_stats_get_cmd_tlv(wmi_unified_t wmi_handle,
 
 	wmi_mtrace(WMI_REQUEST_LINK_STATS_CMDID, cmd->vdev_id, 0);
 	ret = wmi_unified_cmd_send_pm_chk(wmi_handle, buf, len,
-					  WMI_REQUEST_LINK_STATS_CMDID);
+					  WMI_REQUEST_LINK_STATS_CMDID, true);
 	if (ret) {
 		wmi_buf_free(buf);
 		return QDF_STATUS_E_FAILURE;
@@ -5644,7 +5649,8 @@ static QDF_STATUS send_unified_ll_stats_get_sta_cmd_tlv(
 	} else {
 		ret = wmi_unified_cmd_send_pm_chk(
 					wmi_handle, buf, len,
-					WMI_REQUEST_UNIFIED_LL_GET_STA_CMDID);
+					WMI_REQUEST_UNIFIED_LL_GET_STA_CMDID,
+					true);
 	}
 
 	if (QDF_IS_STATUS_ERROR(ret)) {
@@ -15289,7 +15295,7 @@ extract_roam_trigger_stats_tlv(wmi_unified_t wmi_handle, void *evt_buf,
 		trig->btm_trig_data.btm_mbo_assoc_retry_timeout =
 				src_data->btm_mbo_assoc_retry_timeout;
 		trig->btm_trig_data.token = src_data->btm_req_dialog_token;
-		if ((btm_idx + trig->btm_trig_data.candidate_list_count) <
+		if ((btm_idx + trig->btm_trig_data.candidate_list_count) <=
 		    param_buf->num_roam_btm_request_candidate_info)
 			extract_roam_11kv_candidate_info(
 					wmi_handle, evt_buf,

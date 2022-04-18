@@ -8236,10 +8236,6 @@ static int cam_isp_blob_sfe_clock_update(
 					r_clk_updated = true;
 				}
 			} else {
-#if defined(CONFIG_SEC_B0Q_PROJECT) // backpressure overflow W/A fix
-				if (clock_config->left_pix_hz > 500000000)
-					clk_rate = clock_config->left_pix_hz;
-#endif
 				for (j = 0; j < clock_config->num_rdi; j++)
 					clk_rate = max(clock_config->rdi_hz[j],
 						clk_rate);

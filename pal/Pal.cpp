@@ -927,3 +927,17 @@ int32_t pal_gef_rw_param_acdb(uint32_t param_id __unused, void *param_payload,
 
     return status;
 }
+
+#ifdef SEC_AUDIO_COMMON
+void pal_dump(int fd)
+{
+    std::shared_ptr<ResourceManager> rm = NULL;
+    rm = ResourceManager::getInstance();
+
+    dprintf(fd, " \n");
+    dprintf(fd, "pal : \n");
+    if (rm) {
+        rm->dump(fd);
+    }
+}
+#endif

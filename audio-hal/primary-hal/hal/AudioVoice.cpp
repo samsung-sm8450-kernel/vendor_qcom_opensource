@@ -61,6 +61,17 @@ int AudioVoice::SetMode(const audio_mode_t mode) {
                 session->state.new_ = CALL_ACTIVE;
                 AHAL_DBG("new state is ACTIVE for vsid:%x", session->vsid);
             }
+#ifdef SEC_AUDIO_FMRADIO
+            std::shared_ptr<AudioDevice> adevice = AudioDevice::GetInstance();
+            if (adevice->sec_device_->fm.on) {
+                AHAL_DBG("%s: FM force stop for call", __func__);
+                adevice->sec_device_->fm.on = false;
+                struct str_parms *fm_parms = str_parms_create();
+                str_parms_add_int(fm_parms, AUDIO_PARAMETER_KEY_HANDLE_FM,
+                                      (int)(AUDIO_DEVICE_NONE|AUDIO_DEVICE_OUT_SPEAKER));
+                AudioExtn::audio_extn_fm_set_parameters(adevice, fm_parms);
+            }
+#endif
         }
 #endif
         /*start a new session for full voice call*/
@@ -829,6 +840,14 @@ int AudioVoice::VoiceStart(voice_session_t *session) {
     /* apply cached volume set by APM */
     if (session->pal_voice_handle && session->pal_vol_data &&
         session->pal_vol_data->volume_pair[0].vol != -1.0) {
+#ifdef SEC_AUDIO_CALL
+        if ((sec_voice_->volume != -1.0f) &&
+                (session->pal_vol_data->volume_pair[0].vol != sec_voice_->volume)) {
+            AHAL_DBG("apply sec_voice_->volume(%f) instead of cached volume(%f)",
+                        sec_voice_->volume, session->pal_vol_data->volume_pair[0].vol);
+            session->pal_vol_data->volume_pair[0].vol = sec_voice_->volume;
+        }
+#endif
         ret = pal_stream_set_volume(session->pal_voice_handle, session->pal_vol_data);
         if (ret)
             AHAL_ERR("Failed to apply volume on voice session %x", ret);

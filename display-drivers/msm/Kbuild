@@ -233,19 +233,12 @@ ccflags-y +=	-include $(DISPLAY_ROOT)/msm/samsung/S6E3FAB_AMB667XU01/display_S6E
 msm_drm-$(CONFIG_PANEL_S6E3FAB_AMB667XU01_FHD) += samsung/S6E3FAB_AMB667XU01/ss_dsi_panel_S6E3FAB_AMB667XU01.o
 include $(DISPLAY_ROOT)/msm/samsung/S6E3FAB_AMB624XT01/display_S6E3FAB_AMB624XT01.conf
 ccflags-y +=	-include $(DISPLAY_ROOT)/msm/samsung/S6E3FAB_AMB624XT01/display_S6E3FAB_AMB624XT01.h
+
 msm_drm-$(CONFIG_PANEL_S6E3FAB_AMB624XT01_FHD) += samsung/S6E3FAB_AMB624XT01/ss_dsi_panel_S6E3FAB_AMB624XT01.o
-
-include $(DISPLAY_ROOT)/msm/samsung/S6E3HAE_AMB681AZ01/display_S6E3HAE_AMB681AZ01.conf
-ccflags-y +=   -include $(DISPLAY_ROOT)/msm/samsung/S6E3HAE_AMB681AZ01/display_S6E3HAE_AMB681AZ01.h
-
 include $(DISPLAY_ROOT)/msm/samsung/S6E3FAC_AMB655AY01/display_S6E3FAC_AMB655AY01.conf
-ccflags-y +=    -include $(DISPLAY_ROOT)/msm/samsung/S6E3FAC_AMB655AY01/display_S6E3FAC_AMB655AY01.h
-include $(DISPLAY_ROOT)/msm/samsung/S6E3FAC_AMB606AW01/display_S6E3FAC_AMB606AW01.conf
-ccflags-y +=	-include $(DISPLAY_ROOT)/msm/samsung/S6E3FAC_AMB606AW01/display_S6E3FAC_AMB606AW01.h
+ccflags-y +=	-include $(DISPLAY_ROOT)/msm/samsung/S6E3FAC_AMB655AY01/display_S6E3FAC_AMB655AY01.h
 
 msm_drm-$(CONFIG_PANEL_S6E3FAC_AMB655AY01_FHD) += samsung/S6E3FAC_AMB655AY01/ss_dsi_panel_S6E3FAC_AMB655AY01.o
-msm_drm-$(CONFIG_PANEL_S6E3FAC_AMB606AW01_FHD) += samsung/S6E3FAC_AMB606AW01/ss_dsi_panel_S6E3FAC_AMB606AW01.o
-msm_drm-$(CONFIG_PANEL_S6E3HAE_AMB681AZ01_WQHD) += samsung/S6E3HAE_AMB681AZ01/ss_dsi_panel_S6E3HAE_AMB681AZ01.o
 include $(DISPLAY_ROOT)/msm/samsung/panel_common.conf
 ccflags-y +=	-include $(DISPLAY_ROOT)/msm/samsung/panel_common_conf.h
 

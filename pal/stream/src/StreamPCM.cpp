@@ -928,6 +928,11 @@ int32_t StreamPCM::write(struct pal_buffer* buf)
             } else {
                 goto exit;
             }
+        } else if (currentState == STREAM_PAUSED && !isPaused) {
+            for (int i = 0; i < mDevices.size(); i++) {
+                rm->registerDevice(mDevices[i], this);
+            }
+            currentState = STREAM_STARTED;
         }
         PAL_VERBOSE(LOG_TAG, "Exit. session write successful size - %d", size);
         return size;
@@ -1198,7 +1203,6 @@ int32_t StreamPCM::resume_l()
         goto exit;
     }
     isPaused = false;
-    currentState = STREAM_STARTED;
     PAL_DBG(LOG_TAG, "session setConfig successful");
 exit:
     PAL_DBG(LOG_TAG, "Exit status: %d", status);
@@ -1234,6 +1238,10 @@ int32_t StreamPCM::flush()
     if (currentState == STREAM_STOPPED || currentState == STREAM_IDLE) {
         PAL_ERR(LOG_TAG, "Already flushed, state %d", currentState);
         goto exit;
+    }
+
+    for (int i = 0; i < mDevices.size(); i++) {
+        rm->deregisterDevice(mDevices[i], this);
     }
 
     status = session->flush();

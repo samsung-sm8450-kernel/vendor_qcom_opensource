@@ -826,6 +826,11 @@ public:
     void setVoiceVolume(float volume) { voice_volume = volume; };
     float getVoiceVolume() { return voice_volume; };
 #endif
+
+#ifdef SEC_AUDIO_COMMON
+    struct tm * ssrTimeinfo = NULL;
+    void dump(int fd);
+#endif
 };
 
 #endif

@@ -550,7 +550,7 @@ public:
                      );
 
     ~StreamOutPrimary();
-    bool sendGaplessMetadata = false;
+    bool sendGaplessMetadata = true;
     bool isCompressMetadataAvail = false;
     int Standby();
     int SetVolume(float left, float right);

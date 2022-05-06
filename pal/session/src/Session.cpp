@@ -689,6 +689,7 @@ int Session::configureMFC(const std::shared_ptr<ResourceManager>& rm, struct pal
     if ((sAttr.type == PAL_STREAM_COMPRESSED) &&
         (dAttr.id == PAL_DEVICE_OUT_SPEAKER ||
             dAttr.id == PAL_DEVICE_OUT_USB_HEADSET ||
+            dAttr.id == PAL_DEVICE_OUT_AUX_DIGITAL ||
             dAttr.id == PAL_DEVICE_OUT_BLUETOOTH_A2DP)) {
 
         struct sessionToPayloadParam preMfcData;

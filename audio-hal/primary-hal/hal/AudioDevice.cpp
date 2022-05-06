@@ -1170,6 +1170,7 @@ static int adev_dump(const audio_hw_device_t *device, int fd)
             adevice->factory_->Dump(fd);
         }
     }
+    pal_dump(fd);
 #endif
     return 0;
 }
@@ -3069,6 +3070,21 @@ std::shared_ptr<StreamInPrimary> AudioDevice::GetActiveInStream() {
     for (int i = 0; i < stream_in_list_.size(); i++) {
         if (stream_in_list_[i]->mInitialized) {
             AHAL_VERBOSE("Found existing in stream");
+            astream_in = stream_in_list_[i];
+            break;
+        }
+    }
+    in_list_mutex.unlock();
+    return astream_in;
+}
+
+std::shared_ptr<StreamInPrimary> AudioDevice::GetActiveInStreamforVoip() {
+    std::shared_ptr<StreamInPrimary> astream_in = NULL;
+    in_list_mutex.lock();
+    for (int i = 0; i < stream_in_list_.size(); i++) {
+        if (stream_in_list_[i]->mInitialized
+          && (stream_in_list_[i]->GetUseCase() == USECASE_AUDIO_RECORD_VOIP)) {
+            AHAL_VERBOSE("Found existing voip in stream");
             astream_in = stream_in_list_[i];
             break;
         }

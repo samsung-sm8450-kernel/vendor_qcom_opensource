@@ -3202,6 +3202,64 @@ static ssize_t rear_actuator_power_store(struct device *dev,
 	return size;
 }
 
+#if defined(CONFIG_SAMSUNG_ACTUATOR_READ_HALL_VALUE)
+uint16_t af_hall = 0;
+
+static ssize_t rear_af_hall_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int rc = 0;
+	af_hall = 0;
+
+	if (g_a_ctrls[SEC_WIDE_SENSOR]->cam_act_state == CAM_ACTUATOR_START)
+		rc = cam_actuator_read_hall_value(g_a_ctrls[SEC_WIDE_SENSOR], &af_hall);
+	else {
+		CAM_ERR(CAM_ACTUATOR,"[AF] Actuator is not starting\n");
+		return 0;
+	}
+
+	if (rc < 0) {
+		CAM_ERR(CAM_ACTUATOR,"[AF] Hall read failed\n");
+		return 0;
+	}
+
+	CAM_INFO(CAM_ACTUATOR,"[AF] af_hall : %u\n", af_hall);
+
+	rc = scnprintf(buf, PAGE_SIZE, "%u\n", af_hall);
+
+	if (rc)
+		return rc;
+	return 0;
+}
+
+static ssize_t rear3_af_hall_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int rc = 0;
+	af_hall = 0;
+
+	if (g_a_ctrls[SEC_TELE_SENSOR]->cam_act_state == CAM_ACTUATOR_START)
+		rc = cam_actuator_read_hall_value(g_a_ctrls[SEC_TELE_SENSOR], &af_hall);
+	else {
+		CAM_ERR(CAM_ACTUATOR,"[AF] Actuator is not starting\n");
+		return 0;
+	}
+
+	if (rc < 0) {
+		CAM_ERR(CAM_ACTUATOR,"[AF] Hall read failed\n");
+		return 0;
+	}
+
+	CAM_INFO(CAM_ACTUATOR,"[AF] af_hall : %u\n", af_hall);
+
+	rc = scnprintf(buf, PAGE_SIZE, "%u\n", af_hall);
+
+	if (rc)
+		return rc;
+	return 0;
+}
+#endif
+
 #if defined(CONFIG_CAMERA_ADAPTIVE_MIPI)
 char mipi_string[20] = {0, };
 static ssize_t front_camera_mipi_clock_show(struct device *dev,
@@ -4127,6 +4185,11 @@ static DEVICE_ATTR(front2_hwparam, S_IRUGO|S_IWUSR|S_IWGRP,
 
 static DEVICE_ATTR(rear_actuator_power, S_IWUSR|S_IWGRP, NULL, rear_actuator_power_store);
 
+#if defined(CONFIG_SAMSUNG_ACTUATOR_READ_HALL_VALUE)
+static DEVICE_ATTR(rear_af_hall, S_IRUGO, rear_af_hall_show, NULL);
+static DEVICE_ATTR(rear3_af_hall, S_IRUGO, rear3_af_hall_show, NULL);
+#endif
+
 #if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 static DEVICE_ATTR(ois_power, S_IWUSR, NULL, ois_power_store);
 static DEVICE_ATTR(autotest, S_IRUGO|S_IWUSR|S_IWGRP, ois_autotest_show, ois_autotest_store);
@@ -4273,6 +4336,10 @@ const struct device_attribute *rear_attrs[] = {
 	&dev_attr_rear_mtf2_exif,
 	&dev_attr_ssrm_camera_info,
 	&dev_attr_rear_actuator_power,
+#if defined(CONFIG_SAMSUNG_ACTUATOR_READ_HALL_VALUE)
+	&dev_attr_rear_af_hall,
+	&dev_attr_rear3_af_hall,
+#endif
 	&dev_attr_supported_cameraIds,
 #if defined(CONFIG_SAMSUNG_REAR_TRIPLE)
 	&dev_attr_rear3_camfw,

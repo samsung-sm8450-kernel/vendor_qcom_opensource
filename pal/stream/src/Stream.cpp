@@ -1136,6 +1136,7 @@ int32_t Stream::switchDevice(Stream* streamHandle, uint32_t numDev, struct pal_d
     struct pal_device streamDevAttr;
     std::vector <Stream*>::iterator sIter;
     bool foundPalDev = false;
+    bool VoiceorVoip_call_active = false;
 
     rm->lockActiveStream();
     mStreamMutex.lock();
@@ -1299,12 +1300,35 @@ int32_t Stream::switchDevice(Stream* streamHandle, uint32_t numDev, struct pal_d
          * is removed above.
          */
         if (sharedBEStreamDev.size() > 0) {
+            for (const auto &elem : sharedBEStreamDev) {
+                struct pal_stream_attributes strAttr;
+                std::get<0>(elem)->getStreamAttributes(&strAttr);
+                if (strAttr.type == PAL_STREAM_VOIP ||
+                    strAttr.type == PAL_STREAM_VOIP_RX ||
+                    strAttr.type == PAL_STREAM_VOIP_TX ||
+                    strAttr.type == PAL_STREAM_VOICE_CALL) {
+                    VoiceorVoip_call_active = true;
+                    break;
+                }
+            }
             rm->getSndDeviceName(newDeviceId, CurrentSndDeviceName);
             // update device attr based on prio
             rm->updatePriorityAttr(newDeviceId,
                                    sharedBEStreamDev,
                                    &(newDevices[newDeviceSlots[i]]),
                                    &strAttr);
+#ifdef SEC_AUDIO_CALL
+            if (VoiceorVoip_call_active &&
+                strAttr.type != PAL_STREAM_VOICE_CALL &&
+                strAttr.type != PAL_STREAM_VOIP_RX &&
+                strAttr.type != PAL_STREAM_VOIP_TX &&
+                strAttr.type != PAL_STREAM_VOIP &&
+                (strlen(newDevices[newDeviceSlots[i]].custom_config.custom_key) == 0)) {
+                PAL_DBG(LOG_TAG, "no custom key for strAttr.type:%d device id:%d",
+                                    strAttr.type, newDevices[newDeviceSlots[i]].id);
+                VoiceorVoip_call_active = false;
+            }
+#endif
             for (const auto &elem : sharedBEStreamDev) {
                 struct pal_stream_attributes sAttr;
                 Stream *sharedStream = std::get<0>(elem);
@@ -1318,6 +1342,21 @@ int32_t Stream::switchDevice(Stream* streamHandle, uint32_t numDev, struct pal_d
                     continue;
                 }
                 curDev->getDeviceAttributes(&curDevAttr);
+
+                /* avoid device for voice/voip being switched by low priority switch*/
+                if (VoiceorVoip_call_active &&
+                    strAttr.type != PAL_STREAM_VOICE_CALL &&
+                    strAttr.type != PAL_STREAM_VOIP_RX &&
+                    strAttr.type != PAL_STREAM_VOIP_TX &&
+                    strAttr.type != PAL_STREAM_VOIP &&
+                    curDevAttr.id != newDevices[newDeviceSlots[i]].id) {
+                    newDevices[newDeviceSlots[i]].id = curDevAttr.id;
+                    rm->getSndDeviceName(newDevices[newDeviceSlots[i]].id, CurrentSndDeviceName);
+                    rm->updatePriorityAttr(newDevices[newDeviceSlots[i]].id,
+                                       sharedBEStreamDev,
+                                       &(newDevices[newDeviceSlots[i]]),
+                                       &strAttr);
+                }
 
                 /* If prioirty based attr diffs with running dev switch all devices */
                 if (rm->doDevAttrDiffer(&(newDevices[newDeviceSlots[i]]),

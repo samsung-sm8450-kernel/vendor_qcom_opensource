@@ -1620,7 +1620,11 @@ pal_stream_type_t StreamInPrimary::GetPalStreamType(
 
     switch (halStreamFlags) {
         case AUDIO_INPUT_FLAG_FAST:
+#ifdef SEC_AUDIO_SAMSUNGRECORD
+            palStreamType = PAL_STREAM_DEEP_BUFFER;
+#else
             palStreamType = PAL_STREAM_LOW_LATENCY;
+#endif
             break;
         case AUDIO_INPUT_FLAG_RAW:
         case AUDIO_INPUT_FLAG_DIRECT:
@@ -1962,6 +1966,7 @@ int StreamOutPrimary::Flush() {
         }
         mBytesWritten = 0;
     }
+    sendGaplessMetadata = true;
     stream_mutex_.unlock();
 
     if (ret)
@@ -2045,6 +2050,7 @@ int StreamOutPrimary::Standby() {
 
     stream_started_ = false;
     stream_paused_ = false;
+    sendGaplessMetadata = true;
 
 #ifndef SEC_AUDIO_OFFLOAD
     if (CheckOffloadEffectsType(streamAttributes_.type)) {
@@ -3343,7 +3349,8 @@ ssize_t StreamOutPrimary::configurePalOutputStream() {
                 }
 #endif
             }
-            if (isDeviceAvailable(PAL_DEVICE_OUT_USB_HEADSET)) {
+            if (isDeviceAvailable(PAL_DEVICE_OUT_USB_HEADSET) ||
+                isDeviceAvailable(PAL_DEVICE_OUT_AUX_DIGITAL)) {
                 adevice->effect_->send_upscaler_enable_mode();
             }
         }
@@ -3496,14 +3503,16 @@ ssize_t StreamOutPrimary::configurePalOutputStream() {
         adevice->sec_device_->speaker_status_change &&
         (AudioExtn::get_device_types(mAndroidOutDevices) == AUDIO_DEVICE_OUT_SPEAKER)) {
         // force routing to speaker
-        std::set<audio_devices_t> device_types;
-        device_types.insert(AUDIO_DEVICE_OUT_SPEAKER);
 #ifdef SEC_AUDIO_FMRADIO
         if (!adevice->sec_device_->fm.on)
 #endif
-        stream_mutex_.unlock();
-        ForceRouteStream(device_types);
-        stream_mutex_.lock();
+        {
+            std::set<audio_devices_t> device_types;
+            device_types.insert(AUDIO_DEVICE_OUT_SPEAKER);
+            stream_mutex_.unlock();
+            ForceRouteStream(device_types);
+            stream_mutex_.lock();
+        }
         adevice->sec_device_->speaker_status_change = false;
     }
 #endif
@@ -3628,13 +3637,13 @@ bool StreamOutPrimary::CheckOffloadEffectsType(pal_stream_type_t pal_stream_type
 int StreamOutPrimary::UpdateOffloadEffects(
                                     int offload_effect_type) {
     int ret  = 0;
-    
+
     if (offload_effect_type == OFFLOAD_EFFECT_ALL) {
         std::shared_ptr<AudioDevice> adevice = AudioDevice::GetInstance();
         adevice->effect_->send_soundalive_lrsm_value();
         adevice->effect_->send_soundspeed_value();
     }
-    
+
     if (fnp_offload_effect_update_output_) {
         ret = fnp_offload_effect_update_output_(pal_stream_handle_, offload_effect_type);
         if (ret) {

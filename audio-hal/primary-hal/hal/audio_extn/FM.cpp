@@ -150,6 +150,7 @@ int32_t fm_start(std::shared_ptr<AudioDevice> adev __unused, int device_id)
     AHAL_DBG("Enter");
 
 #ifdef SEC_AUDIO_FMRADIO
+    fm.running = false;
     if (device_id == AUDIO_DEVICE_OUT_USB_HEADSET) {
         pal_param_fmradio_usb_gain_t param_fmradio_usb_gain;
         param_fmradio_usb_gain.enable = true;
@@ -249,6 +250,9 @@ int32_t fm_start(std::shared_ptr<AudioDevice> adev __unused, int device_id)
     if (ret) {
         AHAL_ERR("stream start failed with %d", ret);
         pal_stream_close(fm.stream_handle);
+#ifdef SEC_AUDIO_FMRADIO
+        fm.stream_handle = NULL;
+#endif
         return ret;
     }
 

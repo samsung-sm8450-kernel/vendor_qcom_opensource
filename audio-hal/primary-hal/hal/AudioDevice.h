@@ -249,6 +249,7 @@ public:
     void SetForceRouteOutStream(const std::set<audio_devices_t>& new_devices);
     void SetForceRouteInStream(const std::set<audio_devices_t>& new_devices);
     std::shared_ptr<StreamInPrimary> GetActiveInStream();
+    std::shared_ptr<StreamInPrimary> GetActiveInStreamforVoip();
     std::shared_ptr<StreamOutPrimary> OutGetStream(pal_stream_type_t pal_stream_type);
 #endif
 #ifdef SEC_AUDIO_HIDL

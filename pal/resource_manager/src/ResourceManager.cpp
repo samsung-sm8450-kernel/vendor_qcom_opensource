@@ -67,6 +67,9 @@
 
 #define XML_PATH_EXTN_MAX_SIZE 80
 
+#ifdef SEC_AUDIO_COMMON
+#include <time.h>
+#endif
 // { SEC_AUDIO_BOOT_ON_ERR
 #include <cutils/properties.h>
 // } SEC_AUDIO_BOOT_ON_ERR
@@ -974,6 +977,17 @@ void ResourceManager::ssrHandlingLoop(std::shared_ptr<ResourceManager> rm)
                 }
             }
 
+#ifdef SEC_AUDIO_COMMON
+            if (state == CARD_STATUS_OFFLINE) {
+                rm->ssrStarted = true;
+                //get Currnte local time
+                time_t rawtime;
+                time (&rawtime);
+                ssrTimeinfo = localtime(&rawtime);
+                PAL_INFO(LOG_TAG, "Ssr Current local time and date: %s", asctime(ssrTimeinfo));
+            }
+#endif
+        
             if (rm->mActiveStreams.empty()) {
                 /*
                  * Context manager closes its streams on down, so empty list may still
@@ -995,9 +1009,6 @@ void ResourceManager::ssrHandlingLoop(std::shared_ptr<ResourceManager> rm)
             } else if (state == prevState) {
                 PAL_INFO(LOG_TAG, "%d state already handled", state);
             } else if (state == CARD_STATUS_OFFLINE) {
-#ifdef SEC_AUDIO_COMMON
-                rm->ssrStarted = true;
-#endif
                 for (auto str: rm->mActiveStreams) {
                     ret = str->ssrDownHandler();
                     if (0 != ret) {
@@ -2854,6 +2865,7 @@ int ResourceManager::deregisterDevice(std::shared_ptr<Device> d, Stream *s)
     }
 
     mResourceManagerMutex.lock();
+    deregisterDevice_l(d, s);
     if (sAttr.direction == PAL_AUDIO_INPUT) {
         updateECDeviceMap(nullptr, d, s, 0, true);
         mResourceManagerMutex.unlock();
@@ -2949,7 +2961,6 @@ int ResourceManager::deregisterDevice(std::shared_ptr<Device> d, Stream *s)
             }
         }
     }
-    deregisterDevice_l(d, s);
 unlock:
     mResourceManagerMutex.unlock();
 exit:
@@ -5879,6 +5890,7 @@ bool ResourceManager::updateDeviceConfig(std::shared_ptr<Device> *inDev,
     std::vector <std::tuple<Stream *, struct pal_device *>> streamDevConnect;
     std::shared_ptr<Device> dev = nullptr;
     std::string ck;
+    bool VoiceorVoip_call_active = false;
     struct pal_device_info inDeviceInfo;
     uint32_t temp_prio = MIN_USECASE_PRIORITY;
     char inSndDeviceName[DEVICE_NAME_MAX_SIZE] = {0};
@@ -5922,6 +5934,14 @@ bool ResourceManager::updateDeviceConfig(std::shared_ptr<Device> *inDev,
      */
     getSharedBEActiveStreamDevs(sharedBEStreamDev, inDevAttr->id);
     if (sharedBEStreamDev.size() > 0) {
+        for (const auto &elem : sharedBEStreamDev) {
+            struct pal_stream_attributes strAttr;
+            std::get<0>(elem)->getStreamAttributes(&strAttr);
+            if (ifVoiceorVoipCall(strAttr.type)) {
+                VoiceorVoip_call_active = true;
+                break;
+            }
+        }
         getSndDeviceName(inDevAttr->id, inSndDeviceName);
         updatePriorityAttr(inDevAttr->id,
                            sharedBEStreamDev,
@@ -5942,9 +5962,17 @@ bool ResourceManager::updateDeviceConfig(std::shared_ptr<Device> *inDev,
             curDev->getDeviceAttributes(&curDevAttr);
             sharedStream->getStreamAttributes(&sAttr);
 
-            /* special case for UPD to change device to current running dev */
-            if (inStrAttr->type == PAL_STREAM_ULTRASOUND &&
-                    curDevAttr.id != inDevAttr->id) {
+            /* special case for UPD to change device to current running dev
+             * or if voice or voip call is active, use the current devices of
+             * voice or voip call for other usecase if share backend.
+             */
+             if (((VoiceorVoip_call_active &&
+#ifdef SEC_AUDIO_CALL
+                (strlen(curDevAttr.custom_config.custom_key) != 0) &&
+#endif
+                 !ifVoiceorVoipCall(inStrAttr->type)) ||
+                 inStrAttr->type == PAL_STREAM_ULTRASOUND) &&
+                     curDevAttr.id != inDevAttr->id) {
                 inDevAttr->id = curDevAttr.id;
                 getSndDeviceName(inDevAttr->id, inSndDeviceName);
                 updatePriorityAttr(inDevAttr->id,
@@ -9863,3 +9891,14 @@ bool ResourceManager::doDevAttrDiffer(struct pal_device *inDevAttr,
 exit:
     return ret;
 }
+
+#ifdef SEC_AUDIO_COMMON
+void ResourceManager::dump(int fd)
+{
+    dprintf(fd, " \n");
+    dprintf(fd, "ResourceManager : \n");
+    if (ssrTimeinfo) {
+        dprintf(fd, "ssr occurred: %s \n", asctime(ssrTimeinfo));
+    }
+}
+#endif

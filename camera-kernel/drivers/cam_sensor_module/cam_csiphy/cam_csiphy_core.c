@@ -459,7 +459,7 @@ static int32_t cam_csiphy_update_secure_info(
 			(CAM_CSIPHY_MAX_CPHY_LANES));
 	}
 
-	CAM_DBG(CAM_CSIPHY, "csi phy idx:%d, cp_reg_mask:0x%lx",
+	CAM_INFO(CAM_CSIPHY, "csi phy idx:%d, cp_reg_mask:0x%lx",
 		csiphy_dev->soc_info.index,
 		csiphy_dev->csiphy_info[index].csiphy_cpas_cp_reg_mask);
 

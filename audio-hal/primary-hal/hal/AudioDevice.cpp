@@ -37,6 +37,10 @@
 
 #define LOG_TAG "AHAL: AudioDevice"
 #define ATRACE_TAG (ATRACE_TAG_AUDIO|ATRACE_TAG_HAL)
+#define AUDIO_CAPTURE_PERIOD_DURATION_MSEC 20
+#define MIN_CHANNEL_COUNT 1
+#define MAX_CHANNEL_COUNT 8
+
 #include "AudioCommon.h"
 
 #include "AudioDevice.h"
@@ -47,6 +51,7 @@
 
 #include <vector>
 #include <map>
+#include<algorithm>
 
 #include "PalApi.h"
 #include "PalDefs.h"
@@ -611,9 +616,6 @@ int AudioDevice::ReleaseAudioPatch(audio_patch_handle_t handle) {
             ret |= astream_out->RouteStream({AUDIO_DEVICE_NONE});
         }
     }
-#else
-    if (patch_type == AudioPatch::PATCH_PLAYBACK)
-        ret |= voice_->RouteStream({AUDIO_DEVICE_NONE});
 #endif
 
     if (ret)
@@ -1086,17 +1088,76 @@ static char* adev_get_parameters(const struct audio_hw_device *dev,
     return adevice->GetParameters(keys);
 }
 
+static int check_input_parameters(uint32_t sample_rate,
+                                  audio_format_t format,
+                                  int channel_count)
+{
+
+    int ret = 0;
+    static std::vector<int> channel_counts_supported = {1,2,3,4,6,8,10,12,14};
+    static std::vector<uint32_t> sample_rate_supported = {8000,11025,12000,16000,
+                                                    22050,24000,32000,44100,48000,
+                                                    88200,96000,176400,192000 };
+
+    if (((format != AUDIO_FORMAT_PCM_16_BIT) && (format != AUDIO_FORMAT_PCM_8_24_BIT) &&
+        (format != AUDIO_FORMAT_PCM_24_BIT_PACKED) && (format != AUDIO_FORMAT_PCM_32_BIT) &&
+        (format != AUDIO_FORMAT_PCM_FLOAT))) {
+            AHAL_ERR("format not supported!!! format:%d", format);
+            return -EINVAL;
+    }
+
+    if ((channel_count < MIN_CHANNEL_COUNT) || (channel_count > MAX_CHANNEL_COUNT)) {
+        ALOGE("%s: unsupported channel count (%d) passed  Min / Max (%d / %d)", __func__,
+                channel_count, MIN_CHANNEL_COUNT, MAX_CHANNEL_COUNT);
+        return -EINVAL;
+    }
+
+    if ( std::find(channel_counts_supported.begin(),
+                   channel_counts_supported.end(),
+                   channel_count) == channel_counts_supported.end() ) {
+        AHAL_ERR("channel count not supported!!! chanel count:%d", channel_count);
+        return -EINVAL;
+    }
+
+    if ( std::find(sample_rate_supported.begin(), sample_rate_supported.end(),
+                   sample_rate) == sample_rate_supported.end() ) {
+        AHAL_ERR("sample rate not supported!!! sample_rate:%d", sample_rate);
+        return -EINVAL;
+    }
+
+    return ret;
+ }
+
 static size_t adev_get_input_buffer_size(
                                 const struct audio_hw_device *dev __unused,
-                                const struct audio_config *config __unused) {
-#ifdef SEC_AUDIO_COMMON  // TEMP FIX
-    unsigned int period_size = (config->sample_rate * 20) / 1000;
-    size_t size = period_size * audio_bytes_per_sample(config->format) *
-           audio_channel_count_from_in_mask(config->channel_mask);
+                                const struct audio_config *config ) {
+
+    size_t size = 0;
+    uint32_t bytes_per_period_sample = 0;
+    if (config != NULL) {
+        int channel_count = audio_channel_count_from_in_mask(config->channel_mask);
+
+        /* Don't know if USB HIFI in this context so use true to be conservative */
+        if (check_input_parameters(config->sample_rate, config->format, channel_count) != 0) {
+            AHAL_ERR("input parameters not supported!!!");
+            return 0;
+        }
+
+        size = (config->sample_rate * AUDIO_CAPTURE_PERIOD_DURATION_MSEC) / 1000;
+        bytes_per_period_sample = audio_bytes_per_sample(config->format) * channel_count;
+        size *= bytes_per_period_sample;
+    }
+         /* make sure the size is multiple of 32 bytes and additionally multiple of
+          * the frame_size (required for 24bit samples and non-power-of-2 channel counts)
+          * At 48 kHz mono 16-bit PCM:
+          *  5.000 ms = 240 frames = 15*16*1*2 = 480, a whole multiple of 32 (15)
+          *  3.333 ms = 160 frames = 10*16*1*2 = 320, a whole multiple of 32 (10)
+          * Also, make sure the size is multiple of bytes per period sample
+          */
+    size = nearest_multiple(size, lcm(32, bytes_per_period_sample));
+
     return size;
-#else
-    return BUF_SIZE_CAPTURE * NO_OF_BUF;
-#endif
+
 }
 
 int adev_release_audio_patch(struct audio_hw_device *dev,
@@ -1156,6 +1217,13 @@ static int adev_dump(const audio_hw_device_t *device, int fd)
     int major =  (device->common.version >> 8) & 0xff;
     int minor =   device->common.version & 0xff;
     dprintf(fd, "Device API Version: %d.%d \n", major, minor);
+
+#ifdef PAL_HIDL_ENABLED
+    dprintf(fd, "PAL HIDL enabled");
+#else
+    dprintf(fd, "PAL HIDL disabled");
+#endif
+
 #ifdef SEC_AUDIO_COMMON
     std::shared_ptr<AudioDevice> adevice =
             AudioDevice::GetInstance((audio_hw_device_t*)device);
@@ -1212,7 +1280,6 @@ int AudioDevice::Init(hw_device_t **device, const hw_module_t *module) {
      *Once PAL init is sucessfull, register the PAL service
      *from HAL process context
      */
-    AHAL_DBG("Register Pal service");
     AudioExtn::audio_extn_hidl_init();
 
     adev_->device_.get()->common.tag = HARDWARE_DEVICE_TAG;
@@ -1303,13 +1370,8 @@ int AudioDevice::Init(hw_device_t **device, const hw_module_t *module) {
     AudioExtn::audio_extn_fm_init();
     AudioExtn::audio_extn_kpi_optimize_feature_init(
             property_get_bool("vendor.audio.feature.kpi_optimize.enable", false));
-    /* no feature configurations yet */
-#ifdef SEC_AUDIO_COMMON
     AudioExtn::battery_listener_feature_init(
             property_get_bool("vendor.audio.feature.battery_listener.enable", false));
-#else
-    AudioExtn::battery_listener_feature_init(true);
-#endif
     AudioExtn::battery_properties_listener_init(adev_on_battery_status_changed);
     is_charging = AudioExtn::battery_properties_is_charging();
     SetChargingMode(is_charging);
@@ -1591,6 +1653,24 @@ int AudioDevice::SetParameters(const char *kvpairs) {
             ret = pal_set_param( PAL_PARAM_ID_SCREEN_STATE, (void*)&param_screen_st, sizeof(pal_param_screen_state_t));
         }
     }
+
+#ifndef SEC_AUDIO_SUPPORT_UHQ
+    ret = str_parms_get_str(parms, "UHQA", value, sizeof(value));
+    if (ret >= 0) {
+        pal_param_uhqa_t param_uhqa_flag;
+        if (strcmp(value, AUDIO_PARAMETER_VALUE_ON) == 0) {
+            param_uhqa_flag.uhqa_state = true;
+            AHAL_DBG(" - UHQA = on");
+            ret = pal_set_param(PAL_PARAM_ID_UHQA_FLAG, (void*)&param_uhqa_flag,
+                          sizeof(pal_param_uhqa_t));
+        } else {
+            param_uhqa_flag.uhqa_state = false;
+            AHAL_DBG(" - UHQA = false");
+            ret = pal_set_param(PAL_PARAM_ID_UHQA_FLAG, (void*)&param_uhqa_flag,
+                          sizeof(pal_param_uhqa_t));
+        }
+    }
+#endif
 
     ret = str_parms_get_str(parms, AUDIO_PARAMETER_DEVICE_CONNECT,
                             value, sizeof(value));
@@ -1976,27 +2056,7 @@ int AudioDevice::SetParameters(const char *kvpairs) {
             param_bt_sco.bt_sco_on = true;
         } else {
             param_bt_sco.bt_sco_on = false;
-
-            // turn off wideband, super-wideband and BLE voice bit during sco off
-#ifndef SEC_AUDIO_BLUETOOTH // "BT_SCO=off" can be set later than "bt_wbs=true".
-            param_bt_sco.bt_wb_speech_enabled = false;
-            ret = pal_set_param(PAL_PARAM_ID_BT_SCO_WB, (void *)&param_bt_sco,
-                                sizeof(pal_param_btsco_t));
-#endif
-
-            param_bt_sco.bt_lc3_speech_enabled = false;
-            ret = pal_set_param(PAL_PARAM_ID_BT_SCO_LC3, (void *)&param_bt_sco,
-                                sizeof(pal_param_btsco_t));
-
-            param_bt_sco.bt_swb_speech_mode = 0xFFFF;
-            ret = pal_set_param(PAL_PARAM_ID_BT_SCO_SWB, (void *)&param_bt_sco,
-                                sizeof(pal_param_btsco_t));
-
         }
-
-        // clear btsco_lc3_cfg whenever there's sco state change to
-        // avoid stale and partial cfg being used in next round
-        memset(&btsco_lc3_cfg, 0, sizeof(btsco_lc3_cfg_t));
 
         AHAL_INFO("BTSCO on = %d", param_bt_sco.bt_sco_on);
         ret = pal_set_param(PAL_PARAM_ID_BT_SCO, (void *)&param_bt_sco,
@@ -2028,6 +2088,32 @@ int AudioDevice::SetParameters(const char *kvpairs) {
         AHAL_INFO("BTSCO SWB mode = 0x%x", val);
         ret = pal_set_param(PAL_PARAM_ID_BT_SCO_SWB, (void *)&param_bt_sco,
                             sizeof(pal_param_btsco_t));
+    }
+
+    ret = str_parms_get_str(parms, "bt_ble", value, sizeof(value));
+    if (ret >= 0) {
+        pal_param_btsco_t param_bt_sco;
+        if (strcmp(value, AUDIO_PARAMETER_VALUE_ON) == 0) {
+            bt_lc3_speech_enabled = true;
+
+            // turn off wideband, super-wideband
+            param_bt_sco.bt_wb_speech_enabled = false;
+            ret = pal_set_param(PAL_PARAM_ID_BT_SCO_WB, (void *)&param_bt_sco,
+                                sizeof(pal_param_btsco_t));
+
+            param_bt_sco.bt_swb_speech_mode = 0xFFFF;
+            ret = pal_set_param(PAL_PARAM_ID_BT_SCO_SWB, (void *)&param_bt_sco,
+                                sizeof(pal_param_btsco_t));
+        } else {
+            bt_lc3_speech_enabled = false;
+            param_bt_sco.bt_lc3_speech_enabled = false;
+            ret = pal_set_param(PAL_PARAM_ID_BT_SCO_LC3, (void *)&param_bt_sco,
+                                sizeof(pal_param_btsco_t));
+
+            // clear btsco_lc3_cfg to avoid stale and partial cfg being used in next round
+            memset(&btsco_lc3_cfg, 0, sizeof(btsco_lc3_cfg_t));
+        }
+        AHAL_INFO("BTSCO LC3 mode = %d", bt_lc3_speech_enabled);
     }
 
     ret = str_parms_get_str(parms, AUDIO_PARAMETER_KEY_BT_NREC, value, sizeof(value));
@@ -2075,18 +2161,19 @@ int AudioDevice::SetParameters(const char *kvpairs) {
         }
     }
 
-    if ((btsco_lc3_cfg.fields_map & LC3_BIT_MASK) == LC3_BIT_VALID) {
+    if (((btsco_lc3_cfg.fields_map & LC3_BIT_MASK) == LC3_BIT_VALID) &&
+           (bt_lc3_speech_enabled == true)) {
         pal_param_btsco_t param_bt_sco;
-        param_bt_sco.bt_lc3_speech_enabled = true;
+        param_bt_sco.bt_lc3_speech_enabled  = bt_lc3_speech_enabled;
         param_bt_sco.lc3_cfg.frame_duration = btsco_lc3_cfg.frame_duration;
-        param_bt_sco.lc3_cfg.num_blocks = btsco_lc3_cfg.num_blocks;
+        param_bt_sco.lc3_cfg.num_blocks     = btsco_lc3_cfg.num_blocks;
         param_bt_sco.lc3_cfg.rxconfig_index = btsco_lc3_cfg.rxconfig_index;
         param_bt_sco.lc3_cfg.txconfig_index = btsco_lc3_cfg.txconfig_index;
-        param_bt_sco.lc3_cfg.api_version = btsco_lc3_cfg.api_version;
+        param_bt_sco.lc3_cfg.api_version    = btsco_lc3_cfg.api_version;
         strlcpy(param_bt_sco.lc3_cfg.streamMap, btsco_lc3_cfg.streamMap, PAL_LC3_MAX_STRING_LEN);
         strlcpy(param_bt_sco.lc3_cfg.vendor, btsco_lc3_cfg.vendor, PAL_LC3_MAX_STRING_LEN);
 
-        AHAL_INFO("BTSCO LC3 on = %d", param_bt_sco.bt_lc3_speech_enabled);
+        AHAL_INFO("BTSCO LC3 mode = on, sending..");
         ret = pal_set_param(PAL_PARAM_ID_BT_SCO_LC3, (void *)&param_bt_sco,
                             sizeof(pal_param_btsco_t));
 
@@ -2472,16 +2559,16 @@ bool AudioDevice::find_enum_by_string(const struct audio_string_to_enum * table,
     return false;
 }
 
-bool AudioDevice::set_microphone_characteristic(struct audio_microphone_characteristic_t mic)
+bool AudioDevice::set_microphone_characteristic(struct audio_microphone_characteristic_t *mic)
 {
     if (microphones.declared_mic_count >= AUDIO_MICROPHONE_MAX_COUNT) {
         AHAL_ERR("mic number is more than maximum number");
         return false;
     }
     for (size_t ch = 0; ch < AUDIO_CHANNEL_COUNT_MAX; ch++) {
-        mic.channel_mapping[ch] = AUDIO_MICROPHONE_CHANNEL_MAPPING_UNUSED;
+        mic->channel_mapping[ch] = AUDIO_MICROPHONE_CHANNEL_MAPPING_UNUSED;
     }
-    microphones.microphone[microphones.declared_mic_count++] = mic;
+    microphones.microphone[microphones.declared_mic_count++] = *mic;
     return true;
 }
 
@@ -2730,7 +2817,7 @@ void AudioDevice::process_microphone_characteristics(const XML_Char **attr)
         microphone.geometric_location.z = AUDIO_MICROPHONE_COORDINATE_UNKNOWN;
     }
 
-    set_microphone_characteristic(microphone);
+    set_microphone_characteristic(&microphone);
 
 done:
     return;

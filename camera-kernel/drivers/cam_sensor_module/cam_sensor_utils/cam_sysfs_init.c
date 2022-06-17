@@ -3671,6 +3671,71 @@ static ssize_t rear3_camera_hw_param_store(struct device *dev,
 }
 #endif
 
+#if defined(CONFIG_SAMSUNG_REAR_QUADRA)
+static ssize_t rear4_camera_hw_param_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	ssize_t rc = 0;
+	int16_t moduelid_chk = 0;
+	struct cam_hw_param *ec_param = NULL;
+
+	msm_is_sec_get_rear4_hw_param(&ec_param);
+
+	if (ec_param != NULL) {
+		moduelid_chk = is_hw_param_valid_module_id(rear4_module_id);
+
+		switch (moduelid_chk) {
+		case HW_PARAMS_MI_VALID:
+			rc = scnprintf(buf, PAGE_SIZE, "\"CAMIR4_ID\":\"%c%c%c%c%cXX%02X%02X%02X\",\"I2CR4_AF\":\"%d\",\"I2CR4_COM\":\"%d\",\"I2CR4_OIS\":\"%d\","
+					"\"I2CR4_SEN\":\"%d\",\"MIPIR4_COM\":\"%d\",\"MIPIR4_SEN\":\"%d\"\n",
+					rear4_module_id[0], rear4_module_id[1], rear4_module_id[2], rear4_module_id[3],
+					rear4_module_id[4], rear4_module_id[7], rear4_module_id[8], rear4_module_id[9],
+					ec_param->i2c_af_err_cnt, ec_param->i2c_comp_err_cnt, ec_param->i2c_ois_err_cnt,
+					ec_param->i2c_sensor_err_cnt, ec_param->mipi_comp_err_cnt,
+					ec_param->mipi_sensor_err_cnt);
+			break;
+
+		case HW_PARAMS_MIR_ERR_1:
+			rc = scnprintf(buf, PAGE_SIZE, "\"CAMIR4_ID\":\"MIR_ERR\",\"I2CR4_AF\":\"%d\",\"I2CR4_COM\":\"%d\",\"I2CR4_OIS\":\"%d\","
+					"\"I2CR4_SEN\":\"%d\",\"MIPIR4_COM\":\"%d\",\"MIPIR4_SEN\":\"%d\"\n",
+					ec_param->i2c_af_err_cnt, ec_param->i2c_comp_err_cnt, ec_param->i2c_ois_err_cnt,
+					ec_param->i2c_sensor_err_cnt, ec_param->mipi_comp_err_cnt,
+					ec_param->mipi_sensor_err_cnt);
+			break;
+
+		default:
+			rc = scnprintf(buf, PAGE_SIZE, "\"CAMIR4_ID\":\"MI_NO\",\"I2CR4_AF\":\"%d\",\"I2CR4_COM\":\"%d\",\"I2CR4_OIS\":\"%d\","
+					"\"I2CR4_SEN\":\"%d\",\"MIPIR4_COM\":\"%d\",\"MIPIR4_SEN\":\"%d\"\n",
+					ec_param->i2c_af_err_cnt, ec_param->i2c_comp_err_cnt, ec_param->i2c_ois_err_cnt,
+					ec_param->i2c_sensor_err_cnt, ec_param->mipi_comp_err_cnt,
+					ec_param->mipi_sensor_err_cnt);
+			break;
+		}
+	}
+
+	if (rc)
+		return rc;
+	return 0;
+}
+
+static ssize_t rear4_camera_hw_param_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct cam_hw_param *ec_param = NULL;
+
+	CAM_DBG(CAM_UTIL, "[R4] buf : %s\n", buf);
+
+	if (!strncmp(buf, "c", 1)) {
+		msm_is_sec_get_rear4_hw_param(&ec_param);
+		if (ec_param != NULL) {
+			msm_is_sec_init_err_cnt_file(ec_param);
+		}
+	}
+
+	return size;
+}
+#endif
+
 #if defined(CONFIG_SAMSUNG_FRONT_DUAL)
 static ssize_t front2_camera_hw_param_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
@@ -4163,6 +4228,10 @@ static DEVICE_ATTR(rear2_hwparam, S_IRUGO|S_IWUSR|S_IWGRP,
 static DEVICE_ATTR(rear3_hwparam, S_IRUGO|S_IWUSR|S_IWGRP,
 	rear3_camera_hw_param_show, rear3_camera_hw_param_store);
 #endif
+#if defined(CONFIG_SAMSUNG_REAR_QUADRA)
+static DEVICE_ATTR(rear4_hwparam, S_IRUGO|S_IWUSR|S_IWGRP,
+	rear4_camera_hw_param_show, rear4_camera_hw_param_store);
+#endif
 #if defined(CONFIG_SAMSUNG_FRONT_DUAL)
 static DEVICE_ATTR(front2_hwparam, S_IRUGO|S_IWUSR|S_IWGRP,
 	front2_camera_hw_param_show, front2_camera_hw_param_store);
@@ -4402,6 +4471,9 @@ const struct device_attribute *rear_attrs[] = {
 	&dev_attr_rear2_hwparam,
 #if defined(CONFIG_SAMSUNG_REAR_TRIPLE)
 	&dev_attr_rear3_hwparam,
+#endif
+#if defined(CONFIG_SAMSUNG_REAR_QUADRA)
+	&dev_attr_rear4_hwparam,
 #endif
 #endif
 #endif

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
  */
 
@@ -294,7 +295,7 @@ static int dp_ctrl_read_link_status(struct dp_ctrl_private *ctrl,
 			break;
 		}
 
-		if (!(link_status[offset] & DP_LINK_STATUS_UPDATED))
+		if (link_status[offset] & DP_LINK_STATUS_UPDATED)
 			break;
 	}
 
@@ -1052,6 +1053,26 @@ static void dp_ctrl_fec_setup(struct dp_ctrl_private *ctrl)
 		DP_WARN("failed to enable sink fec\n");
 }
 
+static int dp_ctrl_mst_send_act(struct dp_ctrl_private *ctrl)
+{
+	bool act_complete;
+
+	if (!ctrl->mst_mode)
+		return 0;
+
+	ctrl->catalog->trigger_act(ctrl->catalog);
+	msleep(20); /* needs 1 frame time */
+
+	ctrl->catalog->read_act_complete_sts(ctrl->catalog, &act_complete);
+
+	if (!act_complete)
+		DP_ERR("mst act trigger complete failed\n");
+	else
+		DP_MST_DEBUG("mst ACT trigger complete SUCCESS\n");
+
+	return 0;
+}
+
 static int dp_ctrl_link_maintenance(struct dp_ctrl *dp_ctrl)
 {
 	int ret = 0;
@@ -1091,6 +1112,7 @@ static int dp_ctrl_link_maintenance(struct dp_ctrl *dp_ctrl)
 
 	if (ctrl->stream_count) {
 		dp_ctrl_send_video(ctrl);
+		dp_ctrl_mst_send_act(ctrl);
 		dp_ctrl_wait4video_ready(ctrl);
 		dp_ctrl_fec_setup(ctrl);
 	}
@@ -1277,28 +1299,6 @@ static void dp_ctrl_mst_calculate_rg(struct dp_ctrl_private *ctrl,
 	*p_y_frac_enum = y_frac_enum;
 
 	DP_DEBUG("x_int: %d, y_frac_enum: %d\n", x_int, y_frac_enum);
-}
-
-static int dp_ctrl_mst_send_act(struct dp_ctrl_private *ctrl)
-{
-	bool act_complete;
-
-	if (!ctrl->mst_mode)
-		return 0;
-
-	DP_ENTER("\n");
-
-	ctrl->catalog->trigger_act(ctrl->catalog);
-	msleep(20); /* needs 1 frame time */
-
-	ctrl->catalog->read_act_complete_sts(ctrl->catalog, &act_complete);
-
-	if (!act_complete)
-		DP_ERR("mst act trigger complete failed\n");
-	else
-		DP_MST_DEBUG("mst ACT trigger complete SUCCESS\n");
-
-	return 0;
 }
 
 static void dp_ctrl_mst_stream_setup(struct dp_ctrl_private *ctrl,
@@ -1629,7 +1629,7 @@ static void dp_ctrl_off(struct dp_ctrl *dp_ctrl)
 
 	ctrl->catalog->fec_config(ctrl->catalog, false);
 	dp_ctrl_configure_source_link_params(ctrl, false);
-	ctrl->catalog->reset(ctrl->catalog);
+	dp_ctrl_state_ctrl(ctrl, 0);
 
 	/* Make sure DP is disabled before clk disable */
 	wmb();

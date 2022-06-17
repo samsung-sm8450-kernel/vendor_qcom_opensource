@@ -363,15 +363,22 @@ void AudioExtn::audio_extn_set_parameters(std::shared_ptr<AudioDevice> adev,
 
 int AudioExtn::get_controller_stream_from_params(struct str_parms *parms,
                                            int *controller, int *stream) {
-
-    str_parms_get_int(parms, "controller", controller);
-    str_parms_get_int(parms, "stream", stream);
+    if ((str_parms_get_int(parms, "controller", controller) >= 0)
+       && (str_parms_get_int(parms, "stream", stream) >=0 )) {
+        if (*controller < 0 || *controller >= MAX_CONTROLLERS ||
+            *stream < 0 || *stream >= MAX_STREAMS_PER_CONTROLLER) {
+            *controller = 0;
+            *stream = 0;
+            return -EINVAL;
+        }
+    }
+#ifdef SEC_AUDIO_HDMI
     if (*controller < 0 || *controller >= MAX_CONTROLLERS ||
-           *stream < 0 || *stream >= MAX_STREAMS_PER_CONTROLLER) {
+            *stream < 0 || *stream >= MAX_STREAMS_PER_CONTROLLER) {
         *controller = 0;
         *stream = 0;
-        return -EINVAL;
     }
+#endif
     return 0;
 }
 
@@ -769,14 +776,16 @@ int AudioExtn::audio_extn_hidl_init() {
 #ifdef PAL_HIDL_ENABLED
    /* register audio PAL HIDL */
     sp<IPAL> service = new PAL();
-    AHAL_ERR("Register PAL service");
     /*
      *We request for more threads as the same number of threads would be divided
      *between PAL and audio HAL HIDL
      */
     configureRpcThreadpool(32, false /*callerWillJoin*/);
-    if(android::OK !=  service->registerAsService())
-        AHAL_ERR("Could not register AHAL extension");
+    if(android::OK !=  service->registerAsService()) {
+        AHAL_ERR("Could not register PAL service");
+    } else {
+        AHAL_DBG("successfully registered PAL service");
+    }
 #endif
     /* to register other hidls */
     return 0;

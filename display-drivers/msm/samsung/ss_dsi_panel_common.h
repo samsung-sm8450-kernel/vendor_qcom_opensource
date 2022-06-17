@@ -275,6 +275,7 @@ enum {
 };
 
 enum {
+	LPM_1NIT = 1,
 	LPM_2NIT = 2,
 	LPM_10NIT = 10,
 	LPM_30NIT = 30,
@@ -442,6 +443,7 @@ enum ss_dsi_cmd_set_type {
 	TX_LPM_OFF_AOR,
 	TX_LPM_AOD_ON,
 	TX_LPM_AOD_OFF,
+	TX_LPM_1NIT_CMD,
 	TX_LPM_2NIT_CMD,
 	TX_LPM_10NIT_CMD,
 	TX_LPM_30NIT_CMD,
@@ -693,6 +695,8 @@ enum ss_dsi_cmd_set_type {
 	RX_GCT_CHECKSUM,
 	RX_GCT_ECC,	/* Error Correction Code */
  	RX_SSR,		/* Self Source Repair */
+ 	RX_SSR_ON,
+	RX_SSR_CHECK,
 	TX_GCT_ENTER,
 	TX_GCT_MID,
 	TX_GCT_EXIT,
@@ -710,6 +714,10 @@ enum ss_dsi_cmd_set_type {
 	TX_BRIGHTDOT_OFF,
 	TX_BRIGHTDOT_LF_ON,
 	TX_BRIGHTDOT_LF_OFF,
+	TX_DSC_CRC,
+	TX_DSC_CRC_ENTER,
+	TX_DSC_CRC_EXIT,
+	RX_DSC_CRC_CHECK,
 	TX_TEST_MODE_CMD_END,
 
 	/* FLASH GAMMA */
@@ -934,6 +942,8 @@ struct samsung_display_dtsi_data {
 	/* Backlight IC discharge delay */
 	int blic_discharging_delay_tft;
 	int cabc_delay;
+
+	bool ddi_use_flash;
 };
 
 struct display_status {
@@ -1015,6 +1025,8 @@ struct self_display {
 	int on;
 	int file_open;
 	int time_set;
+	bool is_initialized;
+	bool need_to_enable;
 
 	struct self_time_info st_info;
 	struct self_icon_info si_info;
@@ -1480,19 +1492,24 @@ void B4_S6E3FAC_AMF670BS01_FHD_init(struct samsung_display_driver_data *vdd);
 void B4_S6E36W3_AMB190ZB01_260X512_init(struct samsung_display_driver_data *vdd);
 void A23XQ_NT36672C_PM6585JB3_FHD_init(struct samsung_display_driver_data *vdd);
 void A23XQ_TD4375_BS066FBM_FHD_init(struct samsung_display_driver_data *vdd);
+void A23XQ_SW89112_TCFJ6606_FHD_init(struct samsung_display_driver_data *vdd);
+void A23XQ_TD4375_TL066FVMC03_FHD_init(struct samsung_display_driver_data *vdd);
 void Q4_S6E3XA2_AMF756BQ01_QXGA_init(struct samsung_display_driver_data *vdd);
 void Q4_S6E3FAC_AMB619BR01_HD_init(struct samsung_display_driver_data *vdd);
 void PBA_BOOTING_FHD_init(struct samsung_display_driver_data *vdd);
 void PBA_BOOTING_FHD_DSI1_init(struct samsung_display_driver_data *vdd);
 
 struct panel_func {
+	/* INIT*/
+	void (*samsung_panel_init)(struct samsung_display_driver_data *vdd);
+
 	/* ON/OFF */
 	int (*samsung_panel_on_pre)(struct samsung_display_driver_data *vdd);
 	int (*samsung_panel_on_post)(struct samsung_display_driver_data *vdd);
+	int (*samsung_display_on_pre)(struct samsung_display_driver_data *vdd);
 	int (*samsung_display_on_post)(struct samsung_display_driver_data *vdd);
 	int (*samsung_panel_off_pre)(struct samsung_display_driver_data *vdd);
 	int (*samsung_panel_off_post)(struct samsung_display_driver_data *vdd);
-	void (*samsung_panel_init)(struct samsung_display_driver_data *vdd);
 
 	/* DDI RX */
 	char (*samsung_panel_revision)(struct samsung_display_driver_data *vdd);
@@ -1827,6 +1844,8 @@ struct ss_brightness_info {
 
 	int smart_dimming_loaded_dsi;
 	int smart_dimming_hmt_loaded_dsi;
+
+	bool no_brightness;
 };
 
 enum SS_BRR_MODE {
@@ -2440,6 +2459,9 @@ struct samsung_display_driver_data {
 	int ccd_pass_val;
 	int ccd_fail_val;
 
+	/* DSC CRC PASS value */
+	int dsc_crc_pass_val[2];
+
 	int samsung_splash_enabled;
 	int cmd_set_on_splash_enabled;
 
@@ -2593,6 +2615,9 @@ struct samsung_display_driver_data {
 	bool no_mipi_rx;
 
 	bool use_flash_done_recovery;
+
+	/* skip bl update until disp_on with qcom,bl-update-flag */
+	bool bl_delay_until_disp_on;
 };
 
 extern struct list_head vdds_list;
@@ -2723,7 +2748,7 @@ int ss_notify_queue_work(struct samsung_display_driver_data *vdd,
 #endif
 
 int ss_panel_power_ctrl(struct samsung_display_driver_data *vdd, bool enable);
-int ss_panel_regulator_short_detection(struct samsung_display_driver_data *vdd, enum panel_state state);
+int ss_panel_regulator_short_detection(struct samsung_display_driver_data *vdd, enum ss_panel_pwr_state state);
 
 /***************************************************************************************************
 *		BRIGHTNESS RELATED.

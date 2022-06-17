@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
  */
 
 #ifndef _DP_PARSER_H_
@@ -234,6 +234,8 @@ enum secdp_PS5169_voltage_type {
  * @dsc_continuous_pps: PPS sent every frame by HW
  * @has_widebus: widebus (2PPC) feature eanble status
  * @mst_fixed_port: mst port_num reserved for fixed topology
+ * @qos_cpu_mask: CPU mask for QOS
+ * @qos_cpu_latency: CPU Latency setting for QOS
  * @parse: function to be called by client to parse device tree.
  * @get_io: function to be called by client to get io data.
  * @get_io_buf: function to be called by client to get io buffers.
@@ -263,6 +265,8 @@ struct dp_parser {
 	bool gpio_aux_switch;
 	bool lphw_hpd;
 	u32 mst_fixed_port[MAX_DP_MST_STREAMS];
+	u32 qos_cpu_mask;
+	unsigned long qos_cpu_latency;
 
 #if defined(CONFIG_SECDP)
 	bool cc_dir_inv;  /* CC_DIR is inversed, e.g, T865 */

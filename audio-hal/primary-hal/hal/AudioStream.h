@@ -50,20 +50,10 @@
 #endif
 
 #define LOW_LATENCY_PLATFORM_DELAY (13*1000LL)
-#ifdef SEC_AUDIO_COMMON
 #define DEEP_BUFFER_PLATFORM_DELAY (29*1000LL)
-#else
-#define DEEP_BUFFER_PLATFORM_DELAY (70*1000LL)
-#endif
 #define PCM_OFFLOAD_PLATFORM_DELAY (30*1000LL)
 #define MMAP_PLATFORM_DELAY        (3*1000LL)
 #define ULL_PLATFORM_DELAY         (4*1000LL)
-
-//Need to confirm audio source delay values from adsp team
-#define DEEP_BUFFER_PLATFORM_CAPTURE_DELAY (40*1000LL)
-#define LOW_LATENCY_PLATFORM_CAPTURE_DELAY (40*1000LL)
-#define VOIP_TX_PLATFORM_CAPTURE_DELAY (40*1000LL)
-#define RAW_STREAM_PLATFORM_CAPTURE_DELAY (40*1000LL)
 
 #ifdef SEC_AUDIO_COMMON
 #define DEEP_BUFFER_OUTPUT_PERIOD_DURATION 20
@@ -97,7 +87,7 @@
 #else
 #define ULL_PERIOD_MULTIPLIER 3
 #endif
-#define BUF_SIZE_PLAYBACK 1024
+#define BUF_SIZE_PLAYBACK 960
 #define BUF_SIZE_CAPTURE 960
 #define NO_OF_BUF 4
 #define LOW_LATENCY_CAPTURE_SAMPLE_RATE 48000
@@ -515,7 +505,7 @@ protected:
     int usecase_;
     struct pal_volume_data *volume_; /* used to cache volume */
     std::map <audio_devices_t, pal_device_id_t> mAndroidDeviceMap;
-
+    int mmap_shared_memory_fd;
 };
 
 #ifdef SEC_AUDIO_COMMON
@@ -687,7 +677,6 @@ public:
     int addRemoveAudioEffect(const struct audio_stream *stream, effect_handle_t effect,bool enable);
     int SetParameters(const char *kvpairs);
     bool is_st_session;
-    bool is_st_session_active;
     audio_input_flags_t                 flags_;
     int CreateMmapBuffer(int32_t min_size_frames, struct audio_mmap_buffer_info *info);
     int GetMmapPosition(struct audio_mmap_position *position);

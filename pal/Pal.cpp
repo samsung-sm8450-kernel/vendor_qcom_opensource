@@ -201,6 +201,7 @@ int32_t pal_stream_close(pal_stream_handle_t *stream_handle)
         PAL_ERR(LOG_TAG, "stream closed failed. status %d", status);
         goto exit;
     }
+
 exit:
     delete s;
     PAL_INFO(LOG_TAG, "Exit. status %d", status);
@@ -210,6 +211,7 @@ exit:
 int32_t pal_stream_start(pal_stream_handle_t *stream_handle)
 {
     Stream *s = NULL;
+    std::shared_ptr<ResourceManager> rm = NULL;
     int status;
     pal_stream_type_t type;
     pal_stream_direction_t dir;
@@ -220,16 +222,26 @@ int32_t pal_stream_start(pal_stream_handle_t *stream_handle)
     }
     PAL_INFO(LOG_TAG, "Enter. Stream handle %pK", stream_handle);
 
-    s =  reinterpret_cast<Stream *>(stream_handle);
+    rm = ResourceManager::getInstance();
+    if (!rm) {
+        PAL_ERR(LOG_TAG, "Invalid resource manager");
+        status = -EINVAL;
+        goto exit;
+    }
+
+    rm->lockActiveStream();
+    s = reinterpret_cast<Stream *>(stream_handle);
 
     status = s->start();
     if (0 != status) {
         PAL_ERR(LOG_TAG, "stream start failed. status %d", status);
+        rm->unlockActiveStream();
         goto exit;
     }
 
     s->getStreamType(&type);
     s->getStreamDirection(&dir);
+    rm->unlockActiveStream();
     notify_concurrent_stream(type, dir, true);
 exit:
     PAL_INFO(LOG_TAG, "Exit. status %d", status);
@@ -239,6 +251,7 @@ exit:
 int32_t pal_stream_stop(pal_stream_handle_t *stream_handle)
 {
     Stream *s = NULL;
+    std::shared_ptr<ResourceManager> rm = NULL;
     int status;
     pal_stream_type_t type;
     pal_stream_direction_t dir;
@@ -248,17 +261,27 @@ int32_t pal_stream_stop(pal_stream_handle_t *stream_handle)
         return status;
     }
     PAL_INFO(LOG_TAG, "Enter. Stream handle :%pK", stream_handle);
-    s =  reinterpret_cast<Stream *>(stream_handle);
+    rm = ResourceManager::getInstance();
+    if (!rm) {
+        PAL_ERR(LOG_TAG, "Invalid resource manager");
+        status = -EINVAL;
+        goto exit;
+    }
+
+    rm->lockActiveStream();
+    s = reinterpret_cast<Stream *>(stream_handle);
     s->getStreamType(&type);
     s->getStreamDirection(&dir);
 
     status = s->stop();
     if (0 != status) {
         PAL_ERR(LOG_TAG, "stream stop failed. status : %d", status);
+        rm->unlockActiveStream();
         notify_concurrent_stream(type, dir, false);
         goto exit;
     }
 
+    rm->unlockActiveStream();
     notify_concurrent_stream(type, dir, false);
 
 exit:
@@ -332,6 +355,8 @@ int32_t pal_stream_set_param(pal_stream_handle_t *stream_handle, uint32_t param_
 {
     Stream *s = NULL;
     int status;
+    std::shared_ptr<ResourceManager> rm = NULL;
+
     if (!stream_handle) {
         status = -EINVAL;
         PAL_ERR(LOG_TAG,  "Invalid stream handle, status %d", status);
@@ -344,6 +369,16 @@ int32_t pal_stream_set_param(pal_stream_handle_t *stream_handle, uint32_t param_
     if (0 != status) {
         PAL_ERR(LOG_TAG, "set parameters failed status %d param_id %u", status, param_id);
         return status;
+    }
+    rm = ResourceManager::getInstance();
+    if (!rm) {
+        status = -EINVAL;
+        PAL_ERR(LOG_TAG, "Invalid resource manager");
+        return status;
+    }
+    if (param_id == PAL_PARAM_ID_STOP_BUFFERING) {
+        PAL_DBG(LOG_TAG, "Buffering stopped, handle deferred LPI<->NLPI switch");
+        rm->handleDeferredSwitch();
     }
     PAL_DBG(LOG_TAG, "Exit. status %d", status);
     return status;
@@ -616,6 +651,7 @@ int32_t pal_stream_set_device(pal_stream_handle_t *stream_handle,
     struct pal_device_info devinfo = {};
     struct pal_device *pDevices = NULL;
     std::vector <std::shared_ptr<Device>> aDevices;
+    std::vector <struct pal_device> palDevices;
 
     if (!stream_handle) {
         status = -EINVAL;
@@ -657,21 +693,31 @@ int32_t pal_stream_set_device(pal_stream_handle_t *stream_handle,
     }
 
     s->getAssociatedDevices(aDevices);
+    s->getAssociatedPalDevices(palDevices);
     if (!aDevices.empty()) {
         std::set<pal_device_id_t> activeDevices;
         std::set<pal_device_id_t> newDevices;
-        struct pal_device curDevAttr;
         bool force_switch = s->isA2dpMuted();
 
         for (auto &dev : aDevices) {
             activeDevices.insert((pal_device_id_t)dev->getSndDeviceId());
-            // check if custom key matches for same pal device
+            // check if custom key matches for stream associated pal device
             for (int i = 0; i < no_of_devices; i++) {
                 if (dev->getSndDeviceId() == devices[i].id) {
-                    dev->getDeviceAttributes(&curDevAttr);
-                    if (strcmp(devices[i].custom_config.custom_key,
-                            curDevAttr.custom_config.custom_key) != 0) {
-                        PAL_DBG(LOG_TAG, "diff custom key found, force device switch");
+                    s->getAssociatedPalDevices(palDevices);
+                    if (palDevices.size() != 0) {
+                        for (auto palDev: palDevices) {
+                            if (palDev.id == devices[i].id) {
+                                if (strcmp(devices[i].custom_config.custom_key,
+                                    palDev.custom_config.custom_key) != 0) {
+                                    PAL_DBG(LOG_TAG, "diff custom key found, force device switch");
+                                    force_switch = true;
+                                }
+                                break;
+                            }
+                        }
+                    } else {
+                        // pal device hasn't been enabled for this stream yet
                         force_switch = true;
                     }
                     break;
@@ -680,12 +726,13 @@ int32_t pal_stream_set_device(pal_stream_handle_t *stream_handle,
             if (force_switch)
                 break;
         }
-
         if (!force_switch) {
             for (int i = 0; i < no_of_devices; i++) {
                 newDevices.insert(devices[i].id);
-                if (devices[i].id == PAL_DEVICE_OUT_BLUETOOTH_A2DP) {
-                    PAL_DBG(LOG_TAG, "always switch device for a2dp");
+                if ((devices[i].id == PAL_DEVICE_OUT_BLUETOOTH_A2DP) ||
+                    (devices[i].id == PAL_DEVICE_OUT_BLUETOOTH_SCO) ||
+                    (devices[i].id == PAL_DEVICE_IN_BLUETOOTH_SCO_HEADSET)) {
+                    PAL_DBG(LOG_TAG, "always switch device for bt device");
                     force_switch = true;
                     break;
                 }

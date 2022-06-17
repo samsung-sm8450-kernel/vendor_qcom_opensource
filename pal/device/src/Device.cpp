@@ -194,8 +194,10 @@ std::shared_ptr<Device> Device::getObject(pal_device_id_t dev_id)
         PAL_VERBOSE(LOG_TAG, "BT SCO device %d", dev_id);
         return BtSco::getObject(dev_id);
     case PAL_DEVICE_OUT_PROXY:
-    case PAL_DEVICE_IN_PROXY:
     case PAL_DEVICE_OUT_HEARING_AID:
+        PAL_VERBOSE(LOG_TAG, "RTProxyOut device %d", dev_id);
+        return RTProxyOut::getObject();
+    case PAL_DEVICE_IN_PROXY:
     case PAL_DEVICE_IN_TELEPHONY_RX:
         PAL_VERBOSE(LOG_TAG, "RTProxy device %d", dev_id);
         return RTProxy::getObject();
@@ -509,4 +511,40 @@ int32_t Device::setParameter(uint32_t param_id __unused, void *param __unused)
 int32_t Device::getParameter(uint32_t param_id __unused, void **param __unused)
 {
     return 0;
+}
+
+int32_t Device::configureDeviceClockSrc(char const *mixerStrClockSrc, const uint32_t clockSrc)
+{
+    struct mixer *hwMixerHandle = NULL;
+    struct mixer_ctl *clockSrcCtrl = NULL;
+    int32_t ret = 0;
+
+    if (!mixerStrClockSrc) {
+        PAL_ERR(LOG_TAG, "Invalid argument - mixerStrClockSrc");
+        ret = -EINVAL;
+        goto exit;
+    }
+
+    ret = rm->getHwAudioMixer(&hwMixerHandle);
+    if (ret) {
+        PAL_ERR(LOG_TAG, "getHwAudioMixer() failed %d", ret);
+        goto exit;
+    }
+
+    /* Hw mixer control registration is optional in case
+     * clock source selection is not required
+     */
+    clockSrcCtrl = mixer_get_ctl_by_name(hwMixerHandle, mixerStrClockSrc);
+    if (!clockSrcCtrl) {
+        PAL_DBG(LOG_TAG, "%s hw mixer control not identified", mixerStrClockSrc);
+        goto exit;
+    }
+
+    PAL_DBG(LOG_TAG, "HwMixer set %s = %d", mixerStrClockSrc, clockSrc);
+    ret = mixer_ctl_set_value(clockSrcCtrl, 0, clockSrc);
+    if (ret)
+        PAL_ERR(LOG_TAG, "HwMixer set %s = %d failed", mixerStrClockSrc, clockSrc);
+
+exit:
+    return ret;
 }

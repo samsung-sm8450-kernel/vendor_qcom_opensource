@@ -259,7 +259,7 @@ static bool check_for_packet_payload(struct msm_vidc_inst *inst,
 	u32 payload_size = 0;
 
 	if (!inst || !pkt) {
-		d_vpr_e("%s: invalid params %d\n", __func__);
+		d_vpr_e("%s: invalid params\n", __func__);
 		return false;
 	}
 
@@ -307,7 +307,7 @@ static bool check_last_flag(struct msm_vidc_inst *inst,
 	struct hfi_buffer *buffer;
 
 	if (!inst || !pkt) {
-		d_vpr_e("%s: invalid params %d\n", __func__);
+		d_vpr_e("%s: invalid params\n", __func__);
 		return false;
 	}
 
@@ -594,6 +594,10 @@ static int get_driver_buffer_flags(struct msm_vidc_inst *inst, u32 hfi_flags)
 			driver_flags |= MSM_VIDC_BUF_FLAG_ERROR;
 	}
 
+	if (inst->hfi_frame_info.subframe_input)
+		if (inst->capabilities->cap[META_BUF_TAG].value)
+			driver_flags |= MSM_VIDC_BUF_FLAG_ERROR;
+
 	if (hfi_flags & HFI_BUF_FW_FLAG_CODEC_CONFIG)
 		driver_flags |= MSM_VIDC_BUF_FLAG_CODECCONFIG;
 
@@ -742,6 +746,11 @@ static int handle_input_buffer(struct msm_vidc_inst *inst,
 		}
 	}
 
+	if (!(buf->attr & MSM_VIDC_ATTR_QUEUED)) {
+		print_vidc_buffer(VIDC_ERR, "err ", "not queued", inst, buf);
+		return 0;
+	}
+
 	buf->data_size = buffer->data_size;
 	buf->attr &= ~MSM_VIDC_ATTR_QUEUED;
 	buf->attr |= MSM_VIDC_ATTR_DEQUEUED;
@@ -800,6 +809,11 @@ static int handle_output_buffer(struct msm_vidc_inst *inst,
 	}
 	if (!found)
 		return 0;
+
+	if (!(buf->attr & MSM_VIDC_ATTR_QUEUED)) {
+		print_vidc_buffer(VIDC_ERR, "err ", "not queued", inst, buf);
+		return 0;
+	}
 
 	buf->data_offset = buffer->data_offset;
 	buf->data_size = buffer->data_size;
@@ -944,6 +958,12 @@ static int handle_input_metadata_buffer(struct msm_vidc_inst *inst,
 			return 0;
 		}
 	}
+
+	if (!(buf->attr & MSM_VIDC_ATTR_QUEUED)) {
+		print_vidc_buffer(VIDC_ERR, "err ", "not queued", inst, buf);
+		return 0;
+	}
+
 	buf->data_size = buffer->data_size;
 	buf->attr &= ~MSM_VIDC_ATTR_QUEUED;
 	buf->attr |= MSM_VIDC_ATTR_DEQUEUED;
@@ -979,6 +999,11 @@ static int handle_output_metadata_buffer(struct msm_vidc_inst *inst,
 			__func__, buffer->index, buffer->base_address,
 			buffer->data_offset);
 		return -EINVAL;
+	}
+
+	if (!(buf->attr & MSM_VIDC_ATTR_QUEUED)) {
+		print_vidc_buffer(VIDC_ERR, "err ", "not queued", inst, buf);
+		return 0;
 	}
 
 	buf->data_size = buffer->data_size;
@@ -1252,6 +1277,14 @@ static int handle_session_resume(struct msm_vidc_inst *inst,
 	return 0;
 }
 
+static int handle_session_stability(struct msm_vidc_inst *inst,
+	struct hfi_packet *pkt)
+{
+	if (pkt->flags & HFI_FW_FLAGS_SUCCESS)
+		i_vpr_h(inst, "%s: successful\n", __func__);
+	return 0;
+}
+
 static int handle_session_command(struct msm_vidc_inst *inst,
 	struct hfi_packet *pkt)
 {
@@ -1267,6 +1300,7 @@ static int handle_session_command(struct msm_vidc_inst *inst,
 		{HFI_CMD_SUBSCRIBE_MODE,    handle_session_subscribe_mode     },
 		{HFI_CMD_DELIVERY_MODE,     handle_session_delivery_mode      },
 		{HFI_CMD_RESUME,            handle_session_resume             },
+		{HFI_CMD_STABILITY,         handle_session_stability          },
 	};
 
 	/* handle session pkt */
@@ -1400,6 +1434,15 @@ static int handle_session_property(struct msm_vidc_inst *inst,
 		}
 		i_vpr_h(inst, "received no_output property\n");
 		inst->hfi_frame_info.no_output = 1;
+		break;
+	case HFI_PROP_SUBFRAME_INPUT:
+		if (port != INPUT_PORT) {
+			i_vpr_e(inst,
+				"%s: invalid port: %d for property %#x\n",
+				__func__, pkt->port, pkt->type);
+			break;
+		}
+		inst->hfi_frame_info.subframe_input = 1;
 		break;
 	case HFI_PROP_WORST_COMPRESSION_RATIO:
 		inst->hfi_frame_info.cr = payload_ptr[0];
@@ -1736,6 +1779,17 @@ int cancel_response_work(struct msm_vidc_inst *inst)
 		kfree(work->data);
 		kfree(work);
 	}
+
+	return 0;
+}
+
+int cancel_response_work_sync(struct msm_vidc_inst *inst)
+{
+	if (!inst) {
+		d_vpr_e("%s: Invalid arguments\n", __func__);
+		return -EINVAL;
+	}
+	cancel_delayed_work_sync(&inst->response_work);
 
 	return 0;
 }

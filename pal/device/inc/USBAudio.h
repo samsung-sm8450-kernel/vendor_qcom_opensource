@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2019-2021, The Linux Foundation. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -40,11 +40,7 @@
 
 #include <vector>
 
-#ifdef SEC_AUDIO_USB_CONFIGURATION
-#define USB_BUFF_SIZE           4096 // 2048 * 2
-#else
 #define USB_BUFF_SIZE           2048
-#endif
 #define CHANNEL_NUMBER_STR      "Channels: "
 #define PLAYBACK_PROFILE_STR    "Playback:"
 #define CAPTURE_PROFILE_STR     "Capture:"
@@ -125,11 +121,12 @@ public:
     int readBestConfig(struct pal_media_config *config,
                                     struct pal_stream_attributes *sattr,
                                     bool is_playback, struct pal_device_info *devinfo,
-                                    pal_uhqa_state uhqa_state);
+                                    pal_uhqa_state state);
 #else
     int readBestConfig(struct pal_media_config *config,
                                     struct pal_stream_attributes *sattr,
-                                    bool is_playback, struct pal_device_info *devinfo);
+                                    bool is_playback, struct pal_device_info *devinfo,
+                                    bool uhqa);
 #endif
     unsigned int getMax(unsigned int a, unsigned int b);
     unsigned int getMin(unsigned int a, unsigned int b);

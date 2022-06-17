@@ -376,10 +376,9 @@ static int dp_power_clk_init(struct dp_power_private *power, bool enable)
 	}
 
 	return rc;
-
 err_pixel1_clk_rcg:
 	clk_put(power->xo_clk);
-err_xo_clk:	
+err_xo_clk:
 	clk_put(power->pixel_parent);
 err_pixel_parent:
 	clk_put(power->pixel_clk_rcg);
@@ -441,6 +440,7 @@ exit:
 	return rc;
 }
 
+
 static int dp_power_clk_set_rate(struct dp_power_private *power,
 		enum dp_pm_type module, bool enable)
 {
@@ -475,6 +475,8 @@ static int dp_power_clk_set_rate(struct dp_power_private *power,
 			DP_ERR("failed to disable clks\n");
 				goto exit;
 		}
+
+		dp_power_park_module(power, module);
 	}
 exit:
 	return rc;
@@ -1449,7 +1451,7 @@ struct dp_power *dp_power_get(struct dp_parser *parser, struct dp_pll *pll)
 	dp_power->clk_enable = dp_power_clk_enable;
 	dp_power->clk_status = dp_power_clk_status;
 	dp_power->set_pixel_clk_parent = dp_power_set_pixel_clk_parent;
-	dp_power->park_clocks = dp_power_park_clocks;	
+	dp_power->park_clocks = dp_power_park_clocks;
 	dp_power->clk_get_rate = dp_power_clk_get_rate;
 	dp_power->power_client_init = dp_power_client_init;
 	dp_power->power_client_deinit = dp_power_client_deinit;

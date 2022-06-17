@@ -38,6 +38,7 @@
 #include "PayloadBuilder.h"
 #include "Device.h"
 #include "kvh2xml.h"
+#include <unistd.h>
 
 #ifdef SEC_AUDIO_QUICK_USB_DETECTION
 #include <unistd.h>
@@ -137,7 +138,7 @@ int USB::configureUsb()
 
     rm->getBackendName(deviceAttr.id, backEndName);
     dev = Device::getInstance(&deviceAttr, rm);
-    status = rm->getActiveStream_l(dev, activestreams);
+    status = rm->getActiveStream_l(activestreams, dev);
     if ((0 != status) || (activestreams.size() == 0)) {
         PAL_ERR(LOG_TAG, "no active stream available");
         status = -EINVAL;
@@ -367,10 +368,11 @@ int USB::selectBestConfig(struct pal_device *dattr,
 #ifdef SEC_AUDIO_SUPPORT_UHQ
             PAL_INFO(LOG_TAG, "usb device is found. rm->isUHQAEnabled:%d ", rm->stateUHQA);
             status = (*iter)->readBestConfig(&dattr->config, sattr, is_playback,
-                                devinfo, rm->stateUHQA);
+                                   devinfo, rm->stateUHQA);
 #else
             PAL_ERR(LOG_TAG, "usb device is found.");
-            status = (*iter)->readBestConfig(&dattr->config, sattr, is_playback, devinfo);
+            status = (*iter)->readBestConfig(&dattr->config, sattr, is_playback,
+                                   devinfo, rm->isUHQAEnabled);
 #endif
             break;
         }
@@ -460,6 +462,9 @@ int USBCardConfig::getCapability(usb_usecase_type_t type,
     char *bit_width_str = NULL;
     size_t num_read = 0;
     //std::shared_ptr<USBDeviceConfig> usb_device_info = nullptr;
+#ifdef SEC_AUDIO_USB_CONFIGURATION
+    size_t buf_size = 0;
+#endif
 
     bool check = false;
 #ifdef SEC_AUDIO_QUICK_USB_DETECTION
@@ -485,6 +490,57 @@ int USBCardConfig::getCapability(usb_usecase_type_t type,
         }
     }
 #endif
+#ifdef SEC_AUDIO_USB_CONFIGURATION
+    fd = fopen(path, "rb");
+    if (!fd) {
+        PAL_ERR(LOG_TAG, "failed to open config file %s error: %d\n", path, errno);
+        ret = -EINVAL;
+        goto done;
+    }
+
+    buf_size = USB_BUFF_SIZE + 1;
+
+    read_buf = (char *)calloc(1, buf_size);
+    if (!read_buf) {
+        PAL_ERR(LOG_TAG, "Failed to create read_buf");
+        ret = -ENOMEM;
+        goto done;
+    }
+
+    /*
+     * ALSA's USB-Config stream file size can been
+     * increased if more information is added
+     * therefore file reading logic is
+     * changed to read until end-of-file
+     */
+    while (!feof(fd)) {
+        ssize_t read_now = 0;
+        void *realloc_buf = NULL;
+
+        if (num_read == (buf_size - 1)) {
+            buf_size += USB_BUFF_SIZE;
+            realloc_buf = realloc(read_buf, buf_size);
+            if (!realloc_buf) {
+                PAL_ERR(LOG_TAG, "Failed to reallocated read_buf");
+                ret = -ENOMEM;
+                goto done;
+            } else {
+                read_buf = (char *)realloc_buf;
+            }
+
+            PAL_INFO(LOG_TAG, "%s: current buffer size %zu reallocate size %zu \n",
+                        __func__, num_read, buf_size);
+        }
+
+        read_now = fread((read_buf + num_read), 1, USB_BUFF_SIZE, fd);
+        if(ferror(fd)) {
+            PAL_ERR(LOG_TAG, "file read error");
+            goto done;
+        } else {
+            num_read += read_now;
+        }
+    }
+#else
     fd = fopen(path, "r");
     if (!fd) {
         PAL_ERR(LOG_TAG, "failed to open config file %s error: %d\n", path, errno);
@@ -503,6 +559,7 @@ int USBCardConfig::getCapability(usb_usecase_type_t type,
         PAL_ERR(LOG_TAG, "file read error");
         goto done;
     }
+#endif
     read_buf[num_read] = '\0';
 
     str_start = strstr(read_buf, ((type == USB_PLAYBACK) ?
@@ -747,7 +804,7 @@ int USBCardConfig::readBestConfig(struct pal_media_config *config,
 #else
 int USBCardConfig::readBestConfig(struct pal_media_config *config,
                                 struct pal_stream_attributes *sattr, bool is_playback,
-                                struct pal_device_info *devinfo)
+                                struct pal_device_info *devinfo, bool uhqa)
 #endif
 {
     typename std::vector<std::shared_ptr<USBDeviceConfig>>::iterator iter;
@@ -769,10 +826,18 @@ int USBCardConfig::readBestConfig(struct pal_media_config *config,
          iter != usb_device_config_list_.end(); iter++) {
         if ((*iter)->getType() == is_playback) {
             if (is_playback) {
-                PAL_INFO(LOG_TAG, "USB output");
+#ifdef SEC_AUDIO_SUPPORT_UHQ          
+                PAL_INFO(LOG_TAG, "USB output uhqa = %d", state);
+#else
+                PAL_INFO(LOG_TAG, "USB output uhqa = %d", uhqa);
+#endif                
                 media_config = sattr->out_media_config;
             } else {
-                PAL_INFO(LOG_TAG, "USB input");
+#ifdef SEC_AUDIO_SUPPORT_UHQ          
+                PAL_INFO(LOG_TAG, "USB input uhqa = %d", state);
+#else
+                PAL_INFO(LOG_TAG, "USB input uhqa = %d", uhqa);
+#endif             
                 media_config = sattr->in_media_config;
             }
 
@@ -787,9 +852,15 @@ int USBCardConfig::readBestConfig(struct pal_media_config *config,
                 }
 #endif
                 config->bit_width = bitwidth;
+
+                if (!config->bit_width && !max_bit_width)
+                    continue;
+                else if (!config->bit_width && max_bit_width)
+                    config->bit_width = max_bit_width;
+
                 PAL_INFO(LOG_TAG, "found matching BitWidth = %d", config->bit_width);
-                 /* 2. sample rate: Check if the custom sample rate set for device in RM.xml
-                 is supported and then set it, otherwise set the rate based on stream attribute */
+                /* 2. sample rate: Check if the custom sample rate set for device in RM.xml
+                is supported and then set it, otherwise set the rate based on stream attribute */
 #ifdef SEC_AUDIO_SUPPORT_UHQ
                 if (is_playback && state != PAL_UHQ_STATE_NORMAL) {
                     if (state == PAL_UHQ_STATE_384KHZ)
@@ -799,8 +870,14 @@ int USBCardConfig::readBestConfig(struct pal_media_config *config,
                     if (ret != 0)
                         ret = (*iter)->isCustomRateSupported(SAMPLINGRATE_96K, &config->sample_rate);
                 }
-                if (ret != 0)
+#else
+                if (uhqa && is_playback) {
+                    ret = (*iter)->isCustomRateSupported(SAMPLINGRATE_192K, &config->sample_rate);
+                    if (ret != 0)
+                        ret = (*iter)->isCustomRateSupported(SAMPLINGRATE_96K, &config->sample_rate);
+                }
 #endif
+                if (ret != 0)
                     ret = (*iter)->isCustomRateSupported(devinfo->samplerate, &config->sample_rate);
                 if (ret != 0)
                     ret = (*iter)->getBestRate(media_config.sample_rate,
@@ -839,6 +916,10 @@ int USBCardConfig::readBestConfig(struct pal_media_config *config,
             }
 #endif
             config->bit_width = bitwidth;
+
+            if (config->bit_width == 0)
+                config->bit_width = max_bit_width;
+
 #ifdef SEC_AUDIO_SUPPORT_UHQ
             if (is_playback && state != PAL_UHQ_STATE_NORMAL) {
                 if (state == PAL_UHQ_STATE_384KHZ)
@@ -851,8 +932,16 @@ int USBCardConfig::readBestConfig(struct pal_media_config *config,
                     ret = candidate_config->isCustomRateSupported(SAMPLINGRATE_96K,
                                     &config->sample_rate);
             }
-            if (ret != 0)
+#else
+            if (uhqa && is_playback) {
+                ret = candidate_config->isCustomRateSupported(SAMPLINGRATE_192K,
+                                 &config->sample_rate);
+                if (ret != 0)
+                    ret = candidate_config->isCustomRateSupported(SAMPLINGRATE_96K,
+                                 &config->sample_rate);
+            }
 #endif
+            if (ret != 0)
                 ret = candidate_config->isCustomRateSupported(devinfo->samplerate,
                                     &config->sample_rate);
             if (ret != 0)
@@ -1043,11 +1132,14 @@ int USBDeviceConfig::isCustomRateSupported(int requested_rate, unsigned int *bes
 {
     int i = 0;
     int cur_rate = 0;
+
     for (i = 0; i < rate_size_; i++) {
-        cur_rate = rates_[i];
-        if (requested_rate == cur_rate) {
-            *best_rate = requested_rate;
-             return 0;
+        if (i < MAX_SAMPLE_RATE_SIZE) {
+            cur_rate = rates_[i];
+            if (requested_rate == cur_rate) {
+                *best_rate = requested_rate;
+                return 0;
+            }
         }
     }
     PAL_INFO(LOG_TAG, "requested rate not supported = %d", requested_rate);
@@ -1062,13 +1154,15 @@ int USBDeviceConfig::getBestRate(int requested_rate, unsigned int *best_rate) {
     int cur_rate = 0;
 
     for (i = 0; i < rate_size_; i++) {
-        cur_rate = rates_[i];
-        if (requested_rate == cur_rate) {
-            *best_rate = requested_rate;
-            return 0;
-        } else if (abs(double(requested_rate - cur_rate)) <= diff) {
-            nearestRate = cur_rate;
-            diff = abs(double(requested_rate - cur_rate));
+        if (i < MAX_SAMPLE_RATE_SIZE) {
+            cur_rate = rates_[i];
+            if (requested_rate == cur_rate) {
+                *best_rate = requested_rate;
+                return 0;
+            } else if (abs(double(requested_rate - cur_rate)) <= diff) {
+                nearestRate = cur_rate;
+                diff = abs(double(requested_rate - cur_rate));
+            }
         }
         PAL_VERBOSE(LOG_TAG, "nearestRate %d, requested_rate %d", nearestRate, requested_rate);
     }

@@ -599,7 +599,8 @@ int ss_check_rddpm(struct samsung_display_driver_data *vdd, u8 *rddpm)
 	for (bit = RDDPM_POC_LOAD; bit < MAX_RDDPM_BIT; bit++) {
 		if (bit == RDDPM_PTLON || bit == RDDPM_IDMON) /* don't care partial/idle mode */
 			continue;
-
+		if (!vdd->dtsi_data.ddi_use_flash && bit == RDDPM_POC_LOAD)
+			continue;
 		if (!(*rddpm & (1 << bit))) {
 			LCD_ERR(vdd, "%x : rddpm err(bit%d): %s\n", rddpm, bit, rddpm_bit[bit]);
 
@@ -918,8 +919,9 @@ int ss_check_flash_done(struct samsung_display_driver_data *vdd, u8 *buf)
 	} else {
 		LCD_INFO(vdd, "FLASH NOT GOOD [%x]\n", *buf);
 		vdd->flash_done_fail = true;
+		inc_dpui_u32_field(DPUI_KEY_FLASH_LOAD, 1);
 	}
-	
+
 	return ret;
 }
 

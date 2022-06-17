@@ -1653,7 +1653,7 @@ int cam_ois_init(struct cam_ois_ctrl_t *o_ctrl)
 	int rc = 0, retries = 0;
 #if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
 	struct cam_hw_param *hw_param = NULL;
-	uint32_t *hw_cam_position = NULL;
+	uint32_t hw_cam_position;
 #endif
 
 	CAM_INFO(CAM_OIS, "E");
@@ -1671,8 +1671,8 @@ int cam_ois_init(struct cam_ois_ctrl_t *o_ctrl)
 #if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
 				if (rc < 0) {
 					msm_is_sec_get_sensor_position(&hw_cam_position);
-					if (hw_cam_position != NULL) {
-						switch (*hw_cam_position) {
+					{
+						switch (hw_cam_position) {
 						case CAMERA_0:
 							if (!msm_is_sec_get_rear_hw_param(&hw_param)) {
 								if (hw_param != NULL) {
@@ -1697,6 +1697,7 @@ int cam_ois_init(struct cam_ois_ctrl_t *o_ctrl)
 #if defined(CONFIG_SAMSUNG_FRONT_TOP)
 #if defined(CONFIG_SAMSUNG_FRONT_DUAL)
 						case CAMERA_11:
+						case CAMERA_13:
 							if (!msm_is_sec_get_front3_hw_param(&hw_param)) {
 								if (hw_param != NULL) {
 									CAM_ERR(CAM_UTIL, "[HWB][F3][OIS] Err\n");
@@ -1707,6 +1708,7 @@ int cam_ois_init(struct cam_ois_ctrl_t *o_ctrl)
 							break;
 #else
 						case CAMERA_11:
+						case CAMERA_13:
 							if (!msm_is_sec_get_front2_hw_param(&hw_param)) {
 								if (hw_param != NULL) {
 									CAM_ERR(CAM_UTIL, "[HWB][F2][OIS] Err\n");
@@ -1742,8 +1744,19 @@ int cam_ois_init(struct cam_ois_ctrl_t *o_ctrl)
 							break;
 #endif
 
+#if defined(CONFIG_SAMSUNG_REAR_QUADRA)
+						case CAMERA_6:
+							if (!msm_is_sec_get_rear4_hw_param(&hw_param)) {
+								if (hw_param != NULL) {
+									CAM_ERR(CAM_UTIL, "[HWB][R4][OIS] Err\n");
+									hw_param->i2c_ois_err_cnt++;
+									hw_param->need_update_to_file = TRUE;
+								}
+							}
+							break;
+#endif
 						default:
-							CAM_DBG(CAM_UTIL, "[NON][OIS][%d] Unsupport\n", *hw_cam_position);
+							CAM_DBG(CAM_UTIL, "[NON][OIS][%d] Unsupport\n", hw_cam_position);
 							break;
 						}
 					}

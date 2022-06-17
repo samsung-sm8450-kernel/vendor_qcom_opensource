@@ -1915,12 +1915,12 @@ static void ss_panel_set_lpm_mode(
 	if (unlikely(vdd->is_factory_mode)) {
 		if (vdd->panel_lpm.mode == LPM_MODE_OFF) {
 			/* lpm -> normal on */
-			ss_panel_regulator_short_detection(vdd, PANEL_LPM);
+			ss_panel_regulator_short_detection(vdd, PANEL_PWR_LPM);
 			ss_panel_lpm_ctrl(vdd, false);
 		}
 		else {
 			/* normal on -> lpm */
-			ss_panel_regulator_short_detection(vdd, PANEL_ON);
+			ss_panel_regulator_short_detection(vdd, PANEL_PWR_ON);
 			ss_panel_lpm_ctrl(vdd, true);
 		}
 	}
@@ -2657,13 +2657,14 @@ static ssize_t xtalk_store(struct device *dev,
 		}
 	}
 
-	if (is_ss_style_cmd(vdd, TX_XTALK_ON) && is_ss_style_cmd(vdd, TX_XTALK_OFF)) {
+	if (!SS_IS_CMDS_NULL(ss_get_cmds(vdd, TX_XTALK_ON)) &&
+		!SS_IS_CMDS_NULL(ss_get_cmds(vdd, TX_XTALK_OFF))) {
 		vdd->xtalk_mode_on = !!(input);
-		LCD_INFO(vdd, "ss cmd format xtalk(%d)\n", vdd->xtalk_mode_on);
-
 		if (input) {
+			LCD_INFO(vdd, "TX_XTALK_ON & do not send whole bl cmd\n");
 			ss_send_cmd(vdd, TX_XTALK_ON);
 		} else {
+			LCD_INFO(vdd, "TX_XTALK_OFF & return to normal bl\n");
 			ss_send_cmd(vdd, TX_XTALK_OFF);
 			ss_brightness_dcs(vdd, USE_CURRENT_BL_LEVEL, BACKLIGHT_NORMAL);
 		}
@@ -3199,7 +3200,7 @@ static ssize_t mipi_samsung_esd_check_store(struct device *dev,
 
 	if (vdd->esd_recovery.esd_irq_enable)
 		vdd->esd_recovery.esd_irq_enable(value, true, (void *)vdd, ESD_MASK_DEFAULT);
-	
+
 	return size;
 }
 
@@ -3468,7 +3469,10 @@ static int dpui_notifier_callback(struct notifier_block *self,
 	set_dpui_field(DPUI_KEY_PNGFLS, tbuf, size);
 
 	/* ub_con cnt */
-	inc_dpui_u32_field(DPUI_KEY_UB_CON, vdd->ub_con_det.ub_con_cnt);
+	if (vdd->ndx == PRIMARY_DISPLAY_NDX)
+		inc_dpui_u32_field(DPUI_KEY_UB_CON, vdd->ub_con_det.ub_con_cnt);
+	else
+		inc_dpui_u32_field(DPUI_KEY_SUB_UB_CON, vdd->ub_con_det.ub_con_cnt);
 	vdd->ub_con_det.ub_con_cnt = 0;
 
 	return 0;
@@ -4179,6 +4183,132 @@ static ssize_t ss_ccd_state_show(struct device *dev,
 	return ret;
 }
 
+static ssize_t ss_dsc_crc_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct samsung_display_driver_data *vdd =
+		(struct samsung_display_driver_data *)dev_get_drvdata(dev);
+	struct dsi_panel *panel = GET_DSI_PANEL(vdd);
+	int ret = 0;
+	u8 dsc_crc[2] = {0,};
+	int interval_us;
+
+	if (IS_ERR_OR_NULL(vdd)) {
+		LCD_INFO(vdd, "no vdd\n");
+		return ret;
+	}
+
+	if (!ss_is_ready_to_send_cmd(vdd)) {
+		LCD_INFO(vdd, "Panel is not ready. Panel State(%d)\n", vdd->panel_state);
+		return ret;
+	}
+
+	if (is_ss_style_cmd(vdd, TX_DSC_CRC)) {
+		/* prevent sw reset to trigger esd recovery */
+		LCD_INFO(vdd, "disable esd interrupt\n");
+		if (vdd->esd_recovery.esd_irq_enable)
+			vdd->esd_recovery.esd_irq_enable(false, true, (void *)vdd, ESD_MASK_GCT_TEST);
+
+		atomic_inc(&vdd->block_commit_cnt);
+		interval_us = (1000000 / vdd->vrr.cur_refresh_rate) + 1000; /* 1ms dummy */
+		usleep_range(interval_us, interval_us); /* wait for previous commit done */
+		LCD_INFO(vdd, "block commit(%d)\n", interval_us);
+
+		ret = ss_send_cmd_get_rx(vdd, TX_DSC_CRC, dsc_crc);
+		if (!ret) {
+			if ((dsc_crc[0] == vdd->dsc_crc_pass_val[0]) &&
+				(dsc_crc[1] == vdd->dsc_crc_pass_val[1])) {
+				LCD_INFO(vdd, "PASS [%02X] [%02X]\n", dsc_crc[0], dsc_crc[1]);
+				ret = snprintf((char *)buf, 20, "1 %02x %02x\n", dsc_crc[0], dsc_crc[1]);
+			} else {
+				LCD_INFO(vdd, "FAIL [%02X] [%02X]\n", dsc_crc[0], dsc_crc[1]);
+				ret = snprintf((char *)buf, 20, "-1 %02x %02x\n", dsc_crc[0], dsc_crc[1]);
+			}
+		} else {
+			ret = snprintf((char *)buf, 6, "-1\n");
+		}
+
+		/* reset panel */
+		LCD_INFO(vdd, "reset panel +++\n");
+		ss_send_cmd(vdd, DSI_CMD_SET_OFF);
+		vdd->panel_state = PANEL_PWR_OFF;
+		dsi_panel_power_off(panel);
+
+		dsi_panel_power_on(panel);
+		vdd->panel_state = PANEL_PWR_ON_READY;
+		ss_send_cmd(vdd, TX_ON_PRE_SEQ);
+		ss_send_cmd(vdd, DSI_CMD_SET_ON);
+		dsi_panel_update_pps(panel);
+		vdd->mafpc.force_delay = true;
+		ss_panel_on_post(vdd);
+		LCD_INFO(vdd, "reset panel ---\n");
+
+		LCD_INFO(vdd, "release commit\n");
+		atomic_add_unless(&vdd->block_commit_cnt, -1, 0);
+		wake_up_all(&vdd->block_commit_wq);
+
+		/* enable esd interrupt */
+		LCD_INFO(vdd, "enable esd interrupt\n");
+		if (vdd->esd_recovery.esd_irq_enable)
+			vdd->esd_recovery.esd_irq_enable(true, true, (void *)vdd, ESD_MASK_GCT_TEST);
+	} else {
+		/* prevent sw reset to trigger esd recovery */
+		LCD_INFO(vdd, "disable esd interrupt\n");
+		if (vdd->esd_recovery.esd_irq_enable)
+			vdd->esd_recovery.esd_irq_enable(false, true, (void *)vdd, ESD_MASK_GCT_TEST);
+
+		atomic_inc(&vdd->block_commit_cnt);
+		interval_us = (1000000 / vdd->vrr.cur_refresh_rate) + 1000; /* 1ms dummy */
+		usleep_range(interval_us, interval_us); /* wait for previous commit done */
+		LCD_INFO(vdd, "block commit(%d)\n", interval_us);
+
+		ss_send_cmd(vdd, TX_DSC_CRC_ENTER);
+		ret = ss_panel_data_read(vdd, RX_DSC_CRC_CHECK, dsc_crc,
+				LEVEL_KEY_NONE);
+
+		if (!ret) {
+			if ((dsc_crc[0] == vdd->dsc_crc_pass_val[0]) &&
+				(dsc_crc[1] == vdd->dsc_crc_pass_val[1])) {
+				LCD_INFO(vdd, "PASS [%02X] [%02X]\n", dsc_crc[0], dsc_crc[1]);
+				ret = snprintf((char *)buf, 20, "1 %02x %02x\n", dsc_crc[0], dsc_crc[1]);
+			} else {
+				LCD_INFO(vdd, "FAIL [%02X] [%02X]\n", dsc_crc[0], dsc_crc[1]);
+				ret = snprintf((char *)buf, 20, "-1 %02x %02x\n", dsc_crc[0], dsc_crc[1]);
+			}
+		} else {
+			ret = snprintf((char *)buf, 6, "-1\n");
+		}
+		ss_send_cmd(vdd, TX_DSC_CRC_EXIT);
+		/* reset panel */
+		LCD_INFO(vdd, "reset panel +++\n");
+		ss_send_cmd(vdd, DSI_CMD_SET_OFF);
+		vdd->panel_state = PANEL_PWR_OFF;
+		dsi_panel_power_off(panel);
+
+		dsi_panel_power_on(panel);
+		vdd->panel_state = PANEL_PWR_ON_READY;
+		ss_send_cmd(vdd, TX_ON_PRE_SEQ);
+		ss_send_cmd(vdd, DSI_CMD_SET_ON);
+		dsi_panel_update_pps(panel);
+		vdd->mafpc.force_delay = true;
+		ss_panel_on_post(vdd);
+		LCD_INFO(vdd, "reset panel ---\n");
+
+		LCD_INFO(vdd, "release commit\n");
+		atomic_add_unless(&vdd->block_commit_cnt, -1, 0);
+		wake_up_all(&vdd->block_commit_wq);
+
+		/* enable esd interrupt */
+		LCD_INFO(vdd, "enable esd interrupt\n");
+		if (vdd->esd_recovery.esd_irq_enable)
+			vdd->esd_recovery.esd_irq_enable(true, true, (void *)vdd, ESD_MASK_GCT_TEST);
+
+	}
+
+	return ret;
+}
+
+
 static ssize_t ss_isc_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t size)
 {
@@ -4739,11 +4869,50 @@ static ssize_t ss_swing_show(struct device *dev,
 {
 	struct samsung_display_driver_data *vdd =
 		(struct samsung_display_driver_data *)dev_get_drvdata(dev);
+	struct msm_dsi_phy *phy;
+	struct dsi_display *dsi_display = GET_DSI_DISPLAY(vdd);
+	int i, ret = 0;
 	int len = 0;
+	u32 val;
 
-	/* Show: MAX_level MIN_level Current_level */
-	len = sprintf(buf, "FF 00 %x\n", vdd->motto_info.motto_swing);
-	LCD_INFO(vdd,"FF 00 %x\n", vdd->motto_info.motto_swing);
+	if (ss_is_panel_off(vdd)) {
+		LCD_ERR(vdd, "panel is off..\n");
+		return len;
+	}
+
+	ret = dsi_display_clk_ctrl(dsi_display->dsi_clk_handle,
+			DSI_ALL_CLKS, DSI_CLK_ON);
+	if (ret) {
+		LCD_INFO(vdd, "[%s] failed to disable DSI core clocks, rc=%d\n",
+				dsi_display->name, ret);
+		goto end;
+	}
+
+	LCD_INFO(vdd, "ctrl_count : %d\n", dsi_display->ctrl_count);
+
+	/* Loop for dual_dsi : need to write at both 0 & 1 ctrls */
+	/* Normal model will only have 0 ctrl */
+	display_for_each_ctrl(i, dsi_display) {
+		phy = dsi_display->ctrl[i].phy;
+		if (!phy) {
+			LCD_INFO(vdd, "no phy!");
+			continue;
+		}
+		/* Call dsi_phy_hw_v4_0_store_str */
+		val = dsi_phy_show_str(phy);
+
+		len += sprintf(buf + len, "[DSI_%d] %02X (0x00 ~ 0xFF)\n", i, val);
+		LCD_INFO(vdd, "[CTRL_%d] %02X (0x00 ~ 0xFF)\n", i, val);
+	}
+
+	ret = dsi_display_clk_ctrl(dsi_display->dsi_clk_handle,
+			DSI_ALL_CLKS, DSI_CLK_OFF);
+	if (ret) {
+		LCD_INFO(vdd, "[%s] failed to disable DSI core clocks, rc=%d\n",
+				dsi_display->name, ret);
+	}
+
+end:
 	return len;
 }
 
@@ -4819,6 +4988,138 @@ static ssize_t ss_swing_store(struct device *dev,
 end:
 	return size;
 }
+
+static ssize_t ss_phy_vreg_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct samsung_display_driver_data *vdd =
+		(struct samsung_display_driver_data *)dev_get_drvdata(dev);
+	struct msm_dsi_phy *phy;
+	struct dsi_display *dsi_display = GET_DSI_DISPLAY(vdd);
+	int i, ret = 0;
+	int len = 0;
+	u32 val = 0;
+
+	if (ss_is_panel_off(vdd)) {
+		LCD_ERR(vdd, "panel is off..\n");
+		return len;
+	}
+
+	ret = dsi_display_clk_ctrl(dsi_display->dsi_clk_handle,
+			DSI_ALL_CLKS, DSI_CLK_ON);
+	if (ret) {
+		LCD_INFO(vdd, "[%s] failed to disable DSI core clocks, rc=%d\n",
+				dsi_display->name, ret);
+		goto end;
+	}
+
+	LCD_INFO(vdd, "ctrl_count : %d\n", dsi_display->ctrl_count);
+
+	/* Loop for dual_dsi : need to write at both 0 & 1 ctrls */
+	/* Normal model will only have 0 ctrl */
+	display_for_each_ctrl(i, dsi_display) {
+		phy = dsi_display->ctrl[i].phy;
+		if (!phy) {
+			LCD_INFO(vdd, "no phy!");
+			continue;
+		}
+
+		//val = dsi_phy_show_vreg(phy);
+
+		len += sprintf(buf + len, "[DSI_%d] 0x%02X \n", i, val);
+		LCD_INFO(vdd, "[CTRL_%d] 0x%02X \n", i, val);
+	}
+
+	ret = dsi_display_clk_ctrl(dsi_display->dsi_clk_handle,
+			DSI_ALL_CLKS, DSI_CLK_OFF);
+	if (ret) {
+		LCD_INFO(vdd, "[%s] failed to disable DSI core clocks, rc=%d\n",
+				dsi_display->name, ret);
+	}
+
+end:
+	return len;
+}
+
+/* to test dsi phy vreg ctrol register change */
+static ssize_t ss_phy_vreg_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct samsung_display_driver_data *vdd =
+		(struct samsung_display_driver_data *)dev_get_drvdata(dev);
+	u32 val[2];
+	int i, ret = 0;
+	struct msm_dsi_phy *phy;
+	struct dsi_display *dsi_display = GET_DSI_DISPLAY(vdd);
+	bool dual_dsi = ss_is_dual_dsi(vdd);
+
+	if (IS_ERR_OR_NULL(vdd)) {
+		LCD_INFO(vdd, "no vdd");
+		return size;
+	}
+	if (!ss_is_ready_to_send_cmd(vdd)) {
+		LCD_INFO(vdd, "Panel is not ready. Panel State(%d)\n", vdd->panel_state);
+		return size;
+	}
+
+	if (!dsi_display) {
+		LCD_INFO(vdd, "cannot extract dsi_display");
+		return size;
+	}
+
+	if (sscanf(buf, "%x", val) != 1) {
+		LCD_INFO(vdd, "size error\n");
+		return size;
+	}
+	if (*val > 0x00FF) {
+		LCD_INFO(vdd, "invalid value\n");
+		return size;
+	}
+	val[1] = val[0];/* backup input val */
+
+	ret = dsi_display_clk_ctrl(dsi_display->dsi_clk_handle,
+			DSI_ALL_CLKS, DSI_CLK_ON);
+	if (ret) {
+		LCD_INFO(vdd, "[%s] failed to disable DSI core clocks, rc=%d\n",
+				dsi_display->name, ret);
+		goto end;
+	}
+	if (dual_dsi)
+		LCD_INFO(vdd,"dual_dsi!  ndx:%d, ctrl_count:%x\n",
+			vdd->ndx, dsi_display->ctrl_count);
+
+	/* Loop for dual_dsi : need to write at both 0 & 1 ctrls */
+	/* Normal model will only have 0 ctrl */
+	display_for_each_ctrl(i, dsi_display) {
+		phy = dsi_display->ctrl[i].phy;
+		if (!phy) {
+			LCD_INFO(vdd, "no phy!");
+			continue;
+		}
+
+		/* Enable below to make test binary */
+#if 0
+		dsi_phy_store_vreg(phy, val);
+#endif
+	}
+
+	ret = dsi_display_clk_ctrl(dsi_display->dsi_clk_handle,
+			DSI_ALL_CLKS, DSI_CLK_OFF);
+	if (ret) {
+		LCD_INFO(vdd, "[%s] failed to disable DSI core clocks, rc=%d\n",
+				dsi_display->name, ret);
+	}
+
+	/* Enable below to make test binary */
+#if 0
+	/* save updated value if okay*/
+	if (val[1]==val[0])
+		vdd->motto_info.vreg_ctrl_0 = val[0];
+#endif
+end:
+	return size;
+}
+
 
 static ssize_t ss_emphasis_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
@@ -5041,6 +5342,35 @@ static ssize_t ss_te_check_show(struct device *dev,
 	return rc;
 }
 
+static ssize_t ss_udc_data_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct samsung_display_driver_data *vdd =
+		(struct samsung_display_driver_data *)dev_get_drvdata(dev);
+
+	int input;
+
+	if (IS_ERR_OR_NULL(vdd)) {
+		LCD_INFO(vdd, "no vdd");
+		goto end;
+	}
+
+	if (sscanf(buf, "%d", &input) != 1)
+		goto end;
+
+	LCD_INFO(vdd,"(%d)\n", input);
+
+	if (!ss_is_ready_to_send_cmd(vdd)) {
+		LCD_INFO(vdd, "Panel is not ready. Panel State(%d)\n", vdd->panel_state);
+		return size;
+	}
+
+	if (vdd->panel_func.read_udc_data)
+		vdd->panel_func.read_udc_data(vdd);
+end:
+	return size;
+}
+
 static ssize_t ss_udc_data_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -5247,6 +5577,80 @@ end:
 	return size;
 }
 
+static char test_list[5][20] = {
+	"0. NONE",
+	"1. BRIGHTNESS",
+	"2. mDNIe",
+	"3. SELF_DISP",
+	"4. ABC",
+};
+
+static ssize_t ss_test_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int len = 0;
+	int i;
+
+	len += snprintf(buf + len, 100, "[idx] [test]\n");
+	for (i = 1; i < 5; i++)
+		len += snprintf(buf + len, 100, "%s\n", test_list[i]);
+	len += snprintf(buf + len, 100, "Write [idx] [enable] to control\n");
+	len += snprintf(buf + len, 100, "ex) To disable(0) SELF_DISP(3) write below\n");
+	len += snprintf(buf + len, 100, "ex) echo 3 0 > test\n");
+
+	return len;
+}
+
+static ssize_t ss_test_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct samsung_display_driver_data *vdd =
+		(struct samsung_display_driver_data *)dev_get_drvdata(dev);
+	unsigned int input[2];
+
+	if (IS_ERR_OR_NULL(vdd)) {
+		LCD_INFO(vdd, "no vdd");
+		return -ENODEV;
+	}
+
+	if (sscanf(buf, "%d %d", &input[0], &input[1]) != 2)
+		return size;
+
+	switch(input[0]) {
+	case 1 : /* BRIGHTNESS*/
+		if (input[1])
+			vdd->br_info.no_brightness = false;
+		else
+			vdd->br_info.no_brightness = true;
+		break;
+	case 2 : /* mDNIe */
+		if (input[1])
+			vdd->mdnie.support_mdnie = true;
+		else
+			vdd->mdnie.support_mdnie = false;
+		break;
+	case 3 : /* mDNIe */
+		if (input[1]) {
+			vdd->self_disp.is_support = true;
+			if (!vdd->self_disp.is_initialized) {
+				if (vdd->self_disp.init)
+					vdd->self_disp.init(vdd);
+				if (vdd->self_disp.data_init)
+					vdd->self_disp.data_init(vdd);
+			}
+		} else {
+			vdd->self_disp.is_support = false;
+		}
+		break;
+	default:
+		break;
+	}
+
+	LCD_INFO(vdd, "TEST [%s] -> [%s]\n", test_list[input[0]], input[1] ? "ENABLE" : "DISABLE");
+	return size;
+}
+
+
 static DEVICE_ATTR(lcd_type, S_IRUGO, ss_disp_lcdtype_show, NULL);
 static DEVICE_ATTR(cell_id, S_IRUGO, ss_disp_cell_id_show, NULL);
 static DEVICE_ATTR(octa_id, S_IRUGO, ss_disp_octa_id_show, NULL);
@@ -5320,6 +5724,7 @@ static DEVICE_ATTR(isc, S_IRUGO | S_IWUSR | S_IWGRP, NULL, ss_isc_store);
 static DEVICE_ATTR(stm, S_IRUGO | S_IWUSR | S_IWGRP, NULL, ss_stm_store);
 static DEVICE_ATTR(partial_disp, S_IRUGO | S_IWUSR | S_IWGRP, NULL, ss_partial_disp_store);
 static DEVICE_ATTR(dia, S_IRUGO | S_IWUSR | S_IWGRP, NULL, ss_dia_store);
+static DEVICE_ATTR(dsc_crc, S_IRUGO | S_IWUSR | S_IWGRP, ss_dsc_crc_show, NULL);
 
 /* SAMSUNG_FINGERPRINT */
 static DEVICE_ATTR(mask_brightness, S_IRUGO | S_IWUSR | S_IWGRP, NULL, ss_finger_hbm_store);
@@ -5330,15 +5735,17 @@ static DEVICE_ATTR(conn_det, S_IRUGO | S_IWUSR | S_IWGRP, ss_ub_con_det_show, ss
 static DEVICE_ATTR(vrr, S_IRUGO|S_IWUSR|S_IWGRP, vrr_show, NULL);
 static DEVICE_ATTR(vrr_lfd, S_IRUGO|S_IWUSR|S_IWGRP, vrr_lfd_show, vrr_lfd_store);
 static DEVICE_ATTR(swing, S_IRUGO|S_IWUSR|S_IWGRP, ss_swing_show, ss_swing_store);
+static DEVICE_ATTR(phy_vreg, S_IRUGO|S_IWUSR|S_IWGRP, ss_phy_vreg_show, ss_phy_vreg_store);
 static DEVICE_ATTR(emphasis, S_IRUGO|S_IWUSR|S_IWGRP, ss_emphasis_show, ss_emphasis_store);
 static DEVICE_ATTR(ioctl_power_ctrl, S_IRUGO|S_IWUSR|S_IWGRP, ss_ioctl_power_ctrl_show, NULL);
 static DEVICE_ATTR(window_color, S_IRUGO | S_IWUSR | S_IWGRP, ss_window_color_show, ss_window_color_store);
 static DEVICE_ATTR(te_check, S_IRUGO | S_IWUSR | S_IWGRP, ss_te_check_show, NULL);
-static DEVICE_ATTR(udc_data, S_IRUGO | S_IWUSR | S_IWGRP, ss_udc_data_show, NULL);
+static DEVICE_ATTR(udc_data, S_IRUGO | S_IWUSR | S_IWGRP, ss_udc_data_show, ss_udc_data_store);
 static DEVICE_ATTR(udc_fac, S_IRUGO | S_IWUSR | S_IWGRP, ss_udc_factory_show, NULL);
 static DEVICE_ATTR(set_elvss, S_IRUGO | S_IWUSR | S_IWGRP, NULL, ss_set_elvss_store);
 static DEVICE_ATTR(seq_on_delay, 0644, ss_seq_on_delay_show, ss_seq_on_delay_store);
 static DEVICE_ATTR(seq_off_delay, 0644, ss_seq_off_delay_show, ss_seq_off_delay_store);
+static DEVICE_ATTR(test, 0644, ss_test_show, ss_test_store);
 
 static struct attribute *panel_sysfs_attributes[] = {
 	&dev_attr_lcd_type.attr,
@@ -5425,6 +5832,8 @@ static struct attribute *panel_sysfs_attributes[] = {
 	&dev_attr_set_elvss.attr,
 	&dev_attr_seq_on_delay.attr,
 	&dev_attr_seq_off_delay.attr,
+	&dev_attr_dsc_crc.attr,
+	&dev_attr_test.attr,
 	NULL
 };
 static const struct attribute_group panel_sysfs_group = {
@@ -5433,6 +5842,7 @@ static const struct attribute_group panel_sysfs_group = {
 
 static struct attribute *motto_tune_attrs[] = {
 	&dev_attr_swing.attr,
+	&dev_attr_phy_vreg.attr,
 	&dev_attr_emphasis.attr,
 	NULL,
 };

@@ -1487,7 +1487,7 @@ static void ss_set_panel_lpm_brightness(struct samsung_display_driver_data *vdd)
 
 	/* HAE ddi (B0) only issue */
 	/* P220307-02604, P211207-05270 : Do not write AOD 60nit before AOD display on + 1vsync (34ms) */
-	if ((vdd->panel_state == PANEL_PWR_LPM) && 
+	if ((vdd->panel_state == PANEL_PWR_LPM) &&
 		(vdd->display_on == false) &&
 		(vdd->panel_lpm.lpm_bl_level == LPM_60NIT)) {
 		LCD_ERR(vdd, "Do not set AOD(%d) 60nit before display on(%d)\n", vdd->panel_state, vdd->display_on);
@@ -1701,7 +1701,7 @@ static void ss_update_panel_lpm_ctrl_cmd
 			set_lpm_bl = ss_get_cmds(vdd, TX_LPM_2NIT_CMD);
 			gm2_wrdisbv = 8;
 		}
-			
+
 		if (SS_IS_CMDS_NULL(set_lpm_bl)) {
 			LCD_ERR(vdd, "No cmds for lpm_bl..\n");
 			return;
@@ -1877,9 +1877,11 @@ static int ss_self_display_data_init(struct samsung_display_driver_data *vdd)
 	vdd->self_disp.operation[FLAG_SELF_MASK].img_checksum = SELF_MASK_IMG_CHECKSUM;
 	make_mass_self_display_img_cmds_HAE(vdd, TX_SELF_MASK_IMAGE, FLAG_SELF_MASK);
 
-	vdd->self_disp.operation[FLAG_SELF_MASK_CRC].img_buf = self_mask_img_crc_data;
-	vdd->self_disp.operation[FLAG_SELF_MASK_CRC].img_size = ARRAY_SIZE(self_mask_img_crc_data);
-	make_mass_self_display_img_cmds_HAE(vdd, TX_SELF_MASK_IMAGE_CRC, FLAG_SELF_MASK_CRC);
+	if (vdd->is_factory_mode) {
+		vdd->self_disp.operation[FLAG_SELF_MASK_CRC].img_buf = self_mask_img_crc_data;
+		vdd->self_disp.operation[FLAG_SELF_MASK_CRC].img_size = ARRAY_SIZE(self_mask_img_crc_data);
+		make_mass_self_display_img_cmds_HAE(vdd, TX_SELF_MASK_IMAGE_CRC, FLAG_SELF_MASK_CRC);
+	}
 
 	return 1;
 }
@@ -1906,17 +1908,19 @@ static int ss_mafpc_data_init(struct samsung_display_driver_data *vdd)
 		return -EINVAL;
 	}
 
-	/* CRC Check For Factory Mode */
-	vdd->mafpc.crc_img_buf = mafpc_img_data_crc_check;
-	vdd->mafpc.crc_img_size = ARRAY_SIZE(mafpc_img_data_crc_check);
+	if (vdd->is_factory_mode) {
+		/* CRC Check For Factory Mode */
+		vdd->mafpc.crc_img_buf = mafpc_img_data_crc_check;
+		vdd->mafpc.crc_img_size = ARRAY_SIZE(mafpc_img_data_crc_check);
 
-	if (vdd->mafpc.make_img_mass_cmds)
-		vdd->mafpc.make_img_mass_cmds(vdd, vdd->mafpc.crc_img_buf, vdd->mafpc.crc_img_size, TX_MAFPC_CRC_CHECK_IMAGE); /* CRC Check Image Data */
-	else if (vdd->mafpc.make_img_cmds)
-		vdd->mafpc.make_img_cmds(vdd, vdd->mafpc.crc_img_buf, vdd->mafpc.crc_img_size, TX_MAFPC_CRC_CHECK_IMAGE); /* CRC Check Image Data */
-	else {
-		LCD_ERR(vdd, "Can not make mafpc image commands\n");
-		return -EINVAL;
+		if (vdd->mafpc.make_img_mass_cmds)
+			vdd->mafpc.make_img_mass_cmds(vdd, vdd->mafpc.crc_img_buf, vdd->mafpc.crc_img_size, TX_MAFPC_CRC_CHECK_IMAGE); /* CRC Check Image Data */
+		else if (vdd->mafpc.make_img_cmds)
+			vdd->mafpc.make_img_cmds(vdd, vdd->mafpc.crc_img_buf, vdd->mafpc.crc_img_size, TX_MAFPC_CRC_CHECK_IMAGE); /* CRC Check Image Data */
+		else {
+			LCD_ERR(vdd, "Can not make mafpc image commands\n");
+			return -EINVAL;
+		}
 	}
 
 	return true;
@@ -2504,6 +2508,6 @@ void S6E3HAE_AMB681AZ01_WQHD_init(struct samsung_display_driver_data *vdd)
 
 	/* change  MIPI Drive strength values for this panel - request by HW group */
 //	vdd->motto_info.motto_swing = 0xFF;
-	
+
 	LCD_INFO(vdd, "S6E3HAE_AMB681AZ01 : -- \n");
 }
